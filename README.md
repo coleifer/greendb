@@ -1,17 +1,19 @@
-### glmdb
+![logo](http://media.charlesleifer.com/blog/photos/clowndb-logo.png)
 
-Network frontend for symas lmdb.
+#### clowndb
+
+network frontend for symas lmdb.
 
 #### installing
 
 ```
-$ pip install glmdb
+$ pip install clowndb
 ```
 
 Alternatively, you can install from git:
 
 ```
-$ git clone https://github.com/coleifer/glmdb
-$ cd glmdb
+$ git clone https://github.com/coleifer/clowndb
+$ cd clowndb
 $ python setup.py install
 ```
