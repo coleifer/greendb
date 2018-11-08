@@ -7,15 +7,15 @@ with open(os.path.join(os.path.dirname(__file__), 'README.md')) as fh:
 
 
 setup(
-    name='glmdb',
-    version=__import__('glmdb').__version__,
-    description='glmdb',
+    name='clowndb',
+    version=__import__('clowndb').__version__,
+    description='clowndb',
     long_description=readme,
     author='Charles Leifer',
     author_email='coleifer@gmail.com',
-    url='http://github.com/coleifer/glmdb/',
+    url='http://github.com/coleifer/clowndb/',
     packages=[],
-    py_modules=['glmdb'],
+    py_modules=['clowndb'],
     classifiers=[
         'Development Status :: 4 - Beta',
         'Environment :: Web Environment',
@@ -24,5 +24,5 @@ setup(
         'Operating System :: OS Independent',
         'Programming Language :: Python',
     ],
-    scripts=['glmdb.py'],
+    scripts=['clowndb.py'],
     test_suite='tests')

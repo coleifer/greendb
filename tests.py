@@ -9,9 +9,9 @@ import unittest
 
 import gevent
 
-from glmdb import Client
-from glmdb import Server
-from glmdb import logger
+from clowndb import Client
+from clowndb import Server
+from clowndb import logger
 
 
 TEST_HOST = '127.0.0.1'
@@ -21,7 +21,7 @@ TEST_PORT = 31327
 def run_server():
     logger.addHandler(logging.StreamHandler())
     logger.setLevel(logging.ERROR)
-    tmp_dir = tempfile.mkdtemp(suffix='glmdb')
+    tmp_dir = tempfile.mkdtemp(suffix='clowndb')
     data_dir = os.path.join(tmp_dir, 'data')
     config_filename = os.path.join(tmp_dir, 'config.json')
     server = Server(host=TEST_HOST, port=TEST_PORT, path=data_dir,
