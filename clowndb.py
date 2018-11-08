@@ -572,15 +572,15 @@ class Server(object):
 
     def set(self, client, key, value):
         with client.ctx(True) as txn:
-            return txn.put(key, mpackb(value), False, True)
+            return txn.put(key, mpackb(value), dupdata=False, overwrite=True)
 
     def setdup(self, client, key, value):
         with client.ctx(True) as txn:
-            return txn.put(key, mpackb(value), True, True)
+            return txn.put(key, mpackb(value), dupdata=True, overwrite=True)
 
     def setnx(self, client, key, value):
         with client.ctx(True) as txn:
-            return txn.put(key, mpackb(value), False, False)
+            return txn.put(key, mpackb(value), dupdata=False, overwrite=False)
 
     # Bulk K/V operations.
     def mdelete(self, client, keys):

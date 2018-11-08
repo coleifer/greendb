@@ -67,6 +67,25 @@ class TestBasicOperations(BaseTestCase):
         # Getting a nonexistant key returns None.
         self.assertTrue(self.c.get('k1') is None)
 
+        # Let's set and then update a key.
+        self.assertEqual(self.c.set('key', 'ccc'), 1)
+        self.assertEqual(self.c.get('key'), b'ccc')
+
+        # Because our databases use dupsort and multi-value, we actually get
+        # "ccc" here, because "ccc" sorts before "ddd".
+        self.assertEqual(self.c.set('key', 'ddd'), 1)
+        self.assertEqual(self.c.get('key'), b'ccc')
+        self.assertEqual(self.c.set('key', 'bbb'), 1)
+        self.assertEqual(self.c.get('key'), b'bbb')
+        self.assertEqual(self.c.getdup('key'), [b'bbb', b'ccc', b'ddd'])
+        self.assertEqual(self.c.dupcount('key'), 3)
+
+        # However we can't set the same exact key/data, except via setdup:
+        self.assertEqual(self.c.set('key', 'ccc'), 0)
+        self.assertEqual(self.c.set('key', 'bbb'), 0)
+        self.assertEqual(self.c.getdup('key'), [b'bbb', b'ccc', b'ddd'])
+        self.assertEqual(self.c.dupcount('key'), 3)
+
 
 if __name__ == '__main__':
     server_t, server, tmp_dir = run_server()
