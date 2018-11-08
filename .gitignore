@@ -1,0 +1,6 @@
+data/
+config.json
+MANIFEST
+build
+dist
+*.pyc
