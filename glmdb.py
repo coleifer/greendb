@@ -7,7 +7,7 @@ from gevent.server import StreamServer
 from gevent.thread import get_ident
 
 import lmdb
-
+import msgpack
 
 from collections import namedtuple
 from contextlib import contextmanager
@@ -226,8 +226,6 @@ class ProtocolHandler(object):
         first_byte = sock._read(1)
         if first_byte == b'$':
             return self.handle_string(sock)
-        elif first_byte == b'^':
-            return self.handle_unicode(sock)
         elif first_byte == b':':
             return self.handle_integer(sock)
         elif first_byte == b'*':
@@ -267,9 +265,6 @@ class ProtocolHandler(object):
             return None
         return sock.read(length)
 
-    def handle_unicode(self, sock):
-        return decode(self.handle_string(sock))
-
     def handle_array(self, sock):
         num_elements = int(sock.readline())
         return [self.handle(sock) for _ in range(num_elements)]
@@ -287,11 +282,10 @@ class ProtocolHandler(object):
         sock.send(blocking)
 
     def _write(self, sock, data):
+        if isinstance(data, unicode):
+            data = encode(data)
         if isinstance(data, bytes):
             sock.write(b'$%d\r\n%s\r\n' % (len(data), data))
-        elif isinstance(data, unicode):
-            bdata = encode(data)
-            sock.write(b'^%d\r\n%s\r\n' % (len(bdata), bdata))
         elif data is True or data is False:
             sock.write(b':%d\r\n' % (1 if data else 0))
         elif isinstance(data, int):
@@ -431,6 +425,13 @@ class Connection(object):
         self.sock.close()
 
 
+mpackb = msgpack.packb
+munpackb = msgpack.unpackb
+def mpackdict(d):
+    for key, value in d.items():
+        yield (key, mpackb(value))
+
+
 class Server(object):
     def __init__(self, host='127.0.0.1', port=31337, max_clients=1024,
                  path='data', config='config.json'):
@@ -541,7 +542,9 @@ class Server(object):
 
     def get(self, client, key):
         with client.ctx() as txn:
-            return txn.get(key)
+            res = txn.get(key)
+            if res is not None:
+                return munpackb(res)
 
     def getdup(self, client, key):
         with client.cursor() as cursor:
@@ -549,30 +552,32 @@ class Server(object):
                 return
             accum = []
             while cursor.key() == key:
-                accum.append(cursor.value())
+                accum.append(munpackb(cursor.value()))
                 if not cursor.next_dup():
                     break
         return accum
 
     def pop(self, client, key):
         with client.ctx(True) as txn:
-            return txn.pop(key)
+            res = txn.pop(key)
+            if res is not None:
+                return munpackb(res)
 
     def replace(self, client, key, value):
         with client.ctx(True) as txn:
-            return txn.replace(key, value)
+            return txn.replace(key, mpackb(value))
 
     def set(self, client, key, value):
         with client.ctx(True) as txn:
-            return txn.put(key, value, dupdata=False, overwrite=True)
+            return txn.put(key, mpackb(value), False, True)
 
     def setdup(self, client, key, value):
         with client.ctx(True) as txn:
-            return txn.put(key, value, dupdata=True, overwrite=True)
+            return txn.put(key, mpackb(value), True, True)
 
     def setnx(self, client, key, value):
         with client.ctx(True) as txn:
-            return txn.put(key, value, dupdata=False, overwrite=False)
+            return txn.put(key, mpackb(value), False, False)
 
     # Bulk K/V operations.
     def mdelete(self, client, keys):
@@ -589,7 +594,7 @@ class Server(object):
             for key in keys:
                 res = txn.get(key)
                 if res is not None:
-                    accum[key] = res
+                    accum[key] = munpackb(res)
         return accum
 
     def mpop(self, client, keys):
@@ -598,30 +603,30 @@ class Server(object):
             for key in keys:
                 res = cursor.pop(key)
                 if res is not None:
-                    accum[key] = res
+                    accum[key] = munpackb(res)
         return accum
 
     def mreplace(self, client, data):
         n = 0
         with client.cursor(True) as cursor:
             for key, value in data.items():
-                if cursor.replace(key, value):
+                if cursor.replace(key, mpackb(value)):
                     n += 1
         return n
 
     def mset(self, client, data):
         with client.cursor(True) as cursor:
-            consumed, added = cursor.putmulti(data.items(), dupdata=False)
+            consumed, added = cursor.putmulti(mpackdict(data), dupdata=False)
         return added
 
     def msetdup(self, client, data):
         with client.cursor(True) as cursor:
-            consumed, added = cursor.putmulti(data.items())
+            consumed, added = cursor.putmulti(mpackdict(data))
         return added
 
     def msetnx(self, client, data):
         with client.cursor(True) as cursor:
-            consumed, added = cursor.putmulti(data.items(), dupdata=False,
+            consumed, added = cursor.putmulti(mpackdict(data), dupdata=False,
                                               overwrite=False)
         return added
 
@@ -642,7 +647,7 @@ class Server(object):
                 key, value = cursor.item()
                 if stop is not None and key > stop:
                     break
-                accum.append((key, value))
+                accum.append((key, munpackb(value)))
                 if not cursor.next():
                     break
 
