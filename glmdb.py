@@ -33,6 +33,9 @@ logger = logging.getLogger(__name__)
 if sys.version_info[0] == 3:
     unicode = str
     basestring = (bytes, str)
+    int_types = int
+else:
+    int_types = (int, long)
 
 def encode(s):
     if isinstance(s, unicode):
@@ -288,7 +291,7 @@ class ProtocolHandler(object):
             sock.write(b'$%d\r\n%s\r\n' % (len(data), data))
         elif data is True or data is False:
             sock.write(b':%d\r\n' % (1 if data else 0))
-        elif isinstance(data, int):
+        elif isinstance(data, int_types):
             sock.write(b':%d\r\n' % data)
         elif data is None:
             sock.write(b'$-1\r\n')
@@ -366,7 +369,7 @@ class Storage(object):
         return self.env.stat()
 
     def count(self):
-        return self.stat()['entries']
+        return self.env.stat()['entries']
 
     def info(self):
         return self.env.info()
@@ -376,7 +379,7 @@ class Storage(object):
         if not self.is_open:
             raise ValueError('Cannot operate on closed environment.')
 
-        if not isinstance(db, int):
+        if not isinstance(db, int_types):
             raise ValueError('database index must be integer')
 
         txn = self.env.begin(db=self.databases[db], write=write)
