@@ -309,6 +309,66 @@ class TestBasicOperations(BaseTestCase):
             b'k3': b'v3-y',
             b'k4': b'v4-y'})
 
+    def test_getrange(self):
+        self.c.mset(dict(('k%s' % i, 'v%s' % i) for i in range(20)))
+        sorted_values = list(map(int, sorted(map(str, range(20)))))
+        def assertRange(start, end, indices):
+            res = self.c.getrange(start, end)
+            self.assertEqual(res, [[b'k%s' % i, b'v%s' % i] for i in indices])
+
+        assertRange('k3', 'k6', [3, 4, 5, 6])
+        assertRange('k18', 'k3', [18, 19, 2, 3])
+        assertRange('k3x', 'k6x', [4, 5, 6])
+        assertRange('k0', 'k12', [0, 1, 10, 11, 12])
+        assertRange('k01', 'k121', [1, 10, 11, 12])
+
+        # Test boundaries.
+        assertRange(None, None, sorted_values)
+        assertRange(None, 'kz', sorted_values)
+        assertRange('a0', None, sorted_values)
+        assertRange('k0', None, sorted_values)
+        assertRange('k0', 'k9', sorted_values)
+
+        # Test out-of-bounds.
+        assertRange(None, 'a0', [])
+        assertRange('z0', None, [])
+        assertRange('a0', 'a99', [])
+        assertRange('z0', 'z99', [])
+
+    def test_getrange_dupsort(self):
+        self.c.use(3)
+        nums = [0, 1, 10, 2, 3, 4]
+        self.c.mset(dict(('k%s' % i, 'v%s' % i) for i in nums))
+        self.c.mset(dict(('k%s' % i, 'v%s-x' % i) for i in nums if i % 2 == 0))
+
+        def assertRange(start, end, indices):
+            res = self.c.getrange(start, end)
+            accum = []
+            for i in indices:
+                accum.append([b'k%s' % i, b'v%s' % i])
+                if i % 2 == 0:
+                    accum.append([b'k%s' % i, b'v%s-x' % i])
+            self.assertEqual(res, accum)
+
+        assertRange('k2', 'k4', [2, 3, 4])
+        assertRange('k1', 'k3', [1, 10, 2, 3])
+        assertRange('k2x', 'k4x', [3, 4])
+        assertRange('k0', 'k12', [0, 1, 10])
+        assertRange('k01', 'k101', [1, 10])
+
+        # Test boundaries.
+        assertRange(None, None, nums)
+        assertRange(None, 'kz', nums)
+        assertRange('a0', None, nums)
+        assertRange('k0', None, nums)
+        assertRange('k0', 'k9', nums)
+
+        # Test out-of-bounds.
+        assertRange(None, 'a0', [])
+        assertRange('z0', None, [])
+        assertRange('a0', 'a99', [])
+        assertRange('z0', 'z99', [])
+
 
 if __name__ == '__main__':
     server_t, server, tmp_dir = run_server()
