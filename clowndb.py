@@ -312,38 +312,51 @@ class ProtocolHandler(object):
             raise ValueError('unrecognized type')
 
 
-class Storage(object):
-    default_config = {
-        'map_size': 1024 * 1024 * 256,  # 256MB
-        'readonly': False,
-        'metasync': True,
-        'sync': True,  # False *can* lead to corruption!
-        'writemap': False,  # Use a writable mmap.
-        'map_async': False,  # Async flush when writemap enabled.
-        'meminit': True,  # Init new pages with zeroes when writemap enabled.
-        'max_dbs': 16,  # Allow up-to 16 databases.
-        'max_spare_txns': 64,
-        'lock': True,  # Prevent accesses by other processes.
-    }
+DEFAULT_MAP_SIZE = 1024 * 1024 * 256  # 256MB.
 
-    def __init__(self, path, config):
+
+class Storage(object):
+    def __init__(self, path, map_size=DEFAULT_MAP_SIZE, read_only=False,
+                 metasync=True, sync=True, writemap=False, map_async=False,
+                 meminit=True, max_dbs=16, max_spare_txns=64, lock=True,
+                 dupsort=False):
         self._path = path
-        self._config_file = config
+        self._config = {
+            'map_size': DEFAULT_MAP_SIZE,
+            'readonly': read_only,
+            'metasync': metasync,
+            'sync': sync,
+            'writemap': writemap,
+            'map_async': map_async,
+            'meminit': meminit,
+            'max_dbs': max_dbs,
+            'max_spare_txns': max_spare_txns,
+            'lock': lock,
+        }
+        self._dupsort = dupsort
 
         # Open LMDB environment and initialize data-structures.
         self.is_open = False
         self.open()
 
+    def supports_dupsort(self, db):
+        # Allow dupsort to be a list of db indexes or a simple boolean.
+        if isinstance(self._dupsort, list):
+            return db in self._dupsort
+        return self._dupsort
+
     def open(self):
         if self.is_open:
             return False
-        config = self.read_config()
-        self.env = lmdb.open(self._path, **config)
+
+        self.env = lmdb.open(self._path, **self._config)
         self.databases = {}
-        for i in range(config.get('max_dbs') or 16):
+
+        for i in range(self._config['max_dbs']):
             # Allow databases to support duplicate values.
-            self.databases[i] = self.env.open_db(encode('db%s' % i),
-                                                 dupsort=True)
+            self.databases[i] = self.env.open_db(
+                encode('db%s' % i),
+                dupsort=self.supports_dupsort(i))
 
         self.is_open = True
         return True
@@ -355,15 +368,11 @@ class Storage(object):
         self.env.close()
         return True
 
-    def read_config(self):
-        if not os.path.exists(self._config_file):
-            self.write_config(self.default_config)
-        with open(self._config_file) as fh:
-            return json.loads(fh.read())
-
-    def write_config(self, data):
-        with open(self._config_file, 'w') as fh:
-            fh.write(json.dumps(data, indent=2, sort_keys=True))
+    def reset(self):
+        self.close()
+        if os.path.exists(self._path):
+            shutil.rmtree(self._path)
+        return self.open()
 
     def stat(self):
         return self.env.stat()
@@ -395,6 +404,9 @@ class Storage(object):
         db_handle = self.databases[db]
         with self.db(db, True) as txn:
             return txn.drop(db_handle, delete=False)
+
+    def flushall(self):
+        return dict((db, self.flush(db)) for db in self.databases)
 
     def sync(self, force=False):
         return self.env.sync(force)
@@ -435,9 +447,19 @@ def mpackdict(d):
         yield (key, mpackb(value))
 
 
+def requires_dupsort(meth):
+    @wraps(meth)
+    def verify_dupsort(self, client, *args):
+        if not self.storage.supports_dupsort(client.db):
+            raise CommandError('Currently-selected database %s does not '
+                               'support dupsort.' % client.db)
+        return meth(self, client, *args)
+    return verify_dupsort
+
+
 class Server(object):
     def __init__(self, host='127.0.0.1', port=31337, max_clients=1024,
-                 path='data', config='config.json'):
+                 path='data', **storage_config):
         self._host = host
         self._port = port
         self._max_clients = max_clients
@@ -450,8 +472,7 @@ class Server(object):
 
         self._commands = self.get_commands()
         self._protocol = ProtocolHandler()
-
-        self.storage = Storage(path, config)
+        self.storage = Storage(path, **storage_config)
 
     def get_commands(self):
         accum = {}
@@ -460,6 +481,7 @@ class Server(object):
             ('ENVINFO', self.env_info),
             ('ENVSTAT', self.env_stat),
             ('FLUSH', self.flush),
+            ('FLUSHALL', self.flushall),
             ('STAT', self.stat),
             ('SYNC', self.sync),
             ('USEDB', self.use_db),
@@ -481,6 +503,8 @@ class Server(object):
             # Bulk K/V operations.
             ('MDELETE', self.mdelete),
             ('MGET', self.mget),
+            ('MGETDUP', self.mget),
+            ('MGETDUP', self.mgetdup),
             ('MPOP', self.mpop),
             ('MREPLACE', self.mreplace),
             ('MSET', self.mset),
@@ -508,6 +532,9 @@ class Server(object):
     def flush(self, client):
         return self.storage.flush(client.db)
 
+    def flushall(self, client):
+        return self.storage.flushall()
+
     def stat(self, client):
         with client.ctx() as txn:
             return txn.stat()
@@ -516,7 +543,7 @@ class Server(object):
         return self.storage.sync()
 
     def use_db(self, client, name):
-        return client.use_db(decode(name))
+        return client.use_db(name)
 
     # K/V operations.
     def count(self, client):
@@ -528,10 +555,12 @@ class Server(object):
         with client.ctx(True) as txn:
             return txn.delete(key)
 
+    @requires_dupsort
     def deletedup(self, client, key, value):
         with client.ctx(True) as txn:
-            return txn.delete(key, value)
+            return txn.delete(key, mpackb(value))
 
+    @requires_dupsort
     def dupcount(self, client, key):
         with client.cursor() as cursor:
             if not cursor.set_key(key):
@@ -568,12 +597,15 @@ class Server(object):
 
     def replace(self, client, key, value):
         with client.ctx(True) as txn:
-            return txn.replace(key, mpackb(value))
+            old_val = txn.replace(key, mpackb(value))
+            if old_val is not None:
+                return munpackb(old_val)
 
     def set(self, client, key, value):
         with client.ctx(True) as txn:
             return txn.put(key, mpackb(value), dupdata=False, overwrite=True)
 
+    @requires_dupsort
     def setdup(self, client, key, value):
         with client.ctx(True) as txn:
             return txn.put(key, mpackb(value), dupdata=True, overwrite=True)
@@ -600,6 +632,19 @@ class Server(object):
                     accum[key] = munpackb(res)
         return accum
 
+    def mgetdup(self, client, keys):
+        accum = {}
+        with client.cursor() as cursor:
+            for key in keys:
+                if cursor.set_key(key):
+                    values = []
+                    while cursor.key() == key:
+                        values.append(munpackb(cursor.value()))
+                        if not cursor.next_dup():
+                            break
+                    accum[key] = values
+        return accum
+
     def mpop(self, client, keys):
         accum = {}
         with client.cursor(True) as cursor:
@@ -610,12 +655,13 @@ class Server(object):
         return accum
 
     def mreplace(self, client, data):
-        n = 0
+        accum = {}
         with client.cursor(True) as cursor:
             for key, value in data.items():
-                if cursor.replace(key, mpackb(value)):
-                    n += 1
-        return n
+                old_val = cursor.replace(key, mpackb(value))
+                if old_val is not None:
+                    accum[key] = munpackb(old_val)
+        return accum
 
     def mset(self, client, data):
         with client.cursor(True) as cursor:
@@ -781,6 +827,7 @@ class Client(object):
     env_info = command('ENVINFO')
     env_stat = command('ENVSTAT')
     flush = command('FLUSH')
+    flushall = command('FLUSHALL')
     stat = command('STAT')
     sync = command('SYNC')
     use = command('USEDB')
@@ -802,6 +849,7 @@ class Client(object):
     # Bulk k/v operations.
     mdelete = command('MDELETE')
     mget = command('MGET')
+    mgetdup = command('MGETDUP')
     mpop = command('MPOP')
     mreplace = command('MREPLACE')
     mset = command('MSET')
@@ -850,18 +898,26 @@ def configure_logger(options):
         logger.setLevel(logging.INFO)
 
 
+def read_config(config_file):
+    if os.path.exists(config_file):
+        with open(config_file) as fh:
+            return json.loads(fh)
+    return {}
+
+
 if __name__ == '__main__':
     options, args = get_option_parser().parse_args()
 
     configure_logger(options)
-    if options.reset:
-        if os.path.exists(options.data_dir):
-            shutil.rmtree(options.data_dir)
-        if os.path.exists(options.config_file):
-            os.unlink(options.config_file)
+    if options.reset and os.path.exists(options.data_dir):
+        shutil.rmtree(options.data_dir)
 
-    server = Server(options.host, options.port, options.max_clients,
-                    options.data_dir, options.config)
+    config = read_config(options.config or 'config.json')
+    config.setdefault('host', options.host)
+    config.setdefault('port', options.port)
+    config.setdefault('max_clients', options.max_clients)
+    config.setdefault('path', options.data_dir)
+    server = Server(**config)
 
     print('\x1b[32m  .--.')
     print(' /( \x1b[34m@\x1b[33m >\x1b[32m    ,-.  '
