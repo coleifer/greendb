@@ -513,6 +513,7 @@ class Server(object):
 
             # Cursor operations.
             ('GETRANGE', self.getrange),
+            ('PREFIX', self.match_prefix),
 
             # Client operations.
             ('QUIT', self.client_quit),
@@ -680,24 +681,48 @@ class Server(object):
         return added
 
     # Cursor operations.
-    def getrange(self, client, start=None, stop=None):
+    def getrange(self, client, start=None, stop=None, count=None):
         accum = []
+        if count is None:
+            count = 0
+
         with client.cursor() as cursor:
             if start is None:
-                # If the database is empty, first() returns False.
                 if not cursor.first():
                     return []
-            else:
-                # If the start exceeds the largest key, returns False.
-                if not cursor.set_range(start):
-                    return []
+            elif not cursor.set_range(start):
+                return []
 
             while True:
                 key, value = cursor.item()
                 if stop is not None and key > stop:
                     break
                 accum.append((key, munpackb(value)))
-                if not cursor.next():
+                count -= 1
+                if count == 0 or not cursor.next():
+                    break
+
+        return accum
+
+    def match_prefix(self, client, prefix, count=None):
+        accum = []
+        if count is None:
+            count = 0
+
+        with client.cursor() as cursor:
+            if not prefix:
+                if not cursor.first():
+                    return []
+            elif not cursor.set_range(prefix):
+                return []
+
+            while True:
+                key, value = cursor.item()
+                if not key.startswith(prefix):
+                    break
+                accum.append((key, munpackb(value)))
+                count -= 1
+                if count == 0 or not cursor.next():
                     break
 
         return accum
@@ -797,12 +822,7 @@ class Client(object):
         self._sock = None
         return True
 
-    def execute(self, *args):
-        if self._sock is None:
-            raise ConnectionError('not connected!')
-
-        close_conn = args[0] in (b'QUIT', b'SHUTDOWN')
-        self._protocol.write_response(self._sock, args)
+    def read_response(self, close_conn=False):
         try:
             resp = self._protocol.handle(self._sock)
         except EOFError:
@@ -817,6 +837,14 @@ class Client(object):
         if isinstance(resp, Error):
             raise CommandError(decode(resp.message))
         return resp
+
+    def execute(self, *args):
+        if self._sock is None:
+            raise ConnectionError('not connected!')
+
+        close_conn = args[0] in (b'QUIT', b'SHUTDOWN')
+        self._protocol.write_response(self._sock, args)
+        return self.read_response(close_conn)
 
     def command(cmd):
         def method(self, *args):
@@ -858,6 +886,7 @@ class Client(object):
 
     # Cursor operations.
     getrange = command('GETRANGE')
+    prefix = command('PREFIX')
 
     # Client operations.
     quit = command('QUIT')

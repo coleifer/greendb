@@ -309,31 +309,78 @@ class TestBasicOperations(BaseTestCase):
             b'k3': b'v3-y',
             b'k4': b'v4-y'})
 
+    def test_match_prefix(self):
+        indices = list(range(0, 100, 5))
+
+        # k000, k005, k010, k015 ... k090, k095.
+        self.c.mset({'k%03d' % i: 'v%s' % i for i in indices})
+
+        def assertPrefix(prefix, indices, count=None):
+            r = self.c.prefix(prefix, count)
+            if count is not None:
+                indices = indices[:count]
+            self.assertEqual(r, [[b'k%03d' % i, b'v%s' % i] for i in indices])
+
+        for count in (None, 1, 2, 100):
+            # Prefix scan works as expected.
+            assertPrefix('k01', [10, 15])
+            assertPrefix('k00', [0, 5])
+            assertPrefix('k020', [20])
+            assertPrefix('k025', [25])
+
+            # No keys match these prefixes.
+            assertPrefix('k021', [])
+            assertPrefix('k001', [])
+            assertPrefix('k1', [])
+            assertPrefix('j', [])
+
+            # These prefixes match all keys.
+            assertPrefix('', indices)
+            assertPrefix('k', indices)
+            assertPrefix('k0', indices)
+
+    def test_match_prefix_dupsort(self):
+        self.c.use(3)
+        self.c.mset({'aaa': 'a1', 'aab': 'b1', 'aac': 'c1'})
+        self.c.mset({'aaa': 'a2', 'aac': 'c2'})
+        items = [
+            [b'aaa', b'a1'], [b'aaa', b'a2'],
+            [b'aab', b'b1'],
+            [b'aac', b'c1'], [b'aac', b'c2']]
+
+        self.assertEqual(self.c.prefix('aa'), items)
+        self.assertEqual(self.c.prefix('aa', 3), items[:3])
+        self.assertEqual(self.c.prefix('aaa', 3), items[:2])
+        self.assertEqual(self.c.prefix('aaa', 1), items[:1])
+
     def test_getrange(self):
         self.c.mset(dict(('k%s' % i, 'v%s' % i) for i in range(20)))
         sorted_values = list(map(int, sorted(map(str, range(20)))))
-        def assertRange(start, end, indices):
-            res = self.c.getrange(start, end)
+        def assertRange(start, end, indices, count=None):
+            res = self.c.getrange(start, end, count)
+            if count is not None:
+                indices = indices[:count]
             self.assertEqual(res, [[b'k%s' % i, b'v%s' % i] for i in indices])
 
-        assertRange('k3', 'k6', [3, 4, 5, 6])
-        assertRange('k18', 'k3', [18, 19, 2, 3])
-        assertRange('k3x', 'k6x', [4, 5, 6])
-        assertRange('k0', 'k12', [0, 1, 10, 11, 12])
-        assertRange('k01', 'k121', [1, 10, 11, 12])
+        for count in (None, 1, 2, 100):
+            assertRange('k3', 'k6', [3, 4, 5, 6], count)
+            assertRange('k18', 'k3', [18, 19, 2, 3], count)
+            assertRange('k3x', 'k6x', [4, 5, 6], count)
+            assertRange('k0', 'k12', [0, 1, 10, 11, 12], count)
+            assertRange('k01', 'k121', [1, 10, 11, 12], count)
 
-        # Test boundaries.
-        assertRange(None, None, sorted_values)
-        assertRange(None, 'kz', sorted_values)
-        assertRange('a0', None, sorted_values)
-        assertRange('k0', None, sorted_values)
-        assertRange('k0', 'k9', sorted_values)
+            # Test boundaries.
+            assertRange(None, None, sorted_values, count)
+            assertRange(None, 'kz', sorted_values, count)
+            assertRange('a0', None, sorted_values, count)
+            assertRange('k0', None, sorted_values, count)
+            assertRange('k0', 'k9', sorted_values, count)
 
-        # Test out-of-bounds.
-        assertRange(None, 'a0', [])
-        assertRange('z0', None, [])
-        assertRange('a0', 'a99', [])
-        assertRange('z0', 'z99', [])
+            # Test out-of-bounds.
+            assertRange(None, 'a0', [], count)
+            assertRange('z0', None, [], count)
+            assertRange('a0', 'a99', [], count)
+            assertRange('z0', 'z99', [], count)
 
     def test_getrange_dupsort(self):
         self.c.use(3)
@@ -341,33 +388,36 @@ class TestBasicOperations(BaseTestCase):
         self.c.mset(dict(('k%s' % i, 'v%s' % i) for i in nums))
         self.c.mset(dict(('k%s' % i, 'v%s-x' % i) for i in nums if i % 2 == 0))
 
-        def assertRange(start, end, indices):
-            res = self.c.getrange(start, end)
+        def assertRange(start, end, indices, count=None):
+            res = self.c.getrange(start, end, count)
             accum = []
             for i in indices:
                 accum.append([b'k%s' % i, b'v%s' % i])
                 if i % 2 == 0:
                     accum.append([b'k%s' % i, b'v%s-x' % i])
+            if count is not None:
+                accum = accum[:count]
             self.assertEqual(res, accum)
 
-        assertRange('k2', 'k4', [2, 3, 4])
-        assertRange('k1', 'k3', [1, 10, 2, 3])
-        assertRange('k2x', 'k4x', [3, 4])
-        assertRange('k0', 'k12', [0, 1, 10])
-        assertRange('k01', 'k101', [1, 10])
+        for count in (None, 1, 2, 100):
+            assertRange('k2', 'k4', [2, 3, 4], count)
+            assertRange('k1', 'k3', [1, 10, 2, 3], count)
+            assertRange('k2x', 'k4x', [3, 4], count)
+            assertRange('k0', 'k12', [0, 1, 10], count)
+            assertRange('k01', 'k101', [1, 10], count)
 
-        # Test boundaries.
-        assertRange(None, None, nums)
-        assertRange(None, 'kz', nums)
-        assertRange('a0', None, nums)
-        assertRange('k0', None, nums)
-        assertRange('k0', 'k9', nums)
+            # Test boundaries.
+            assertRange(None, None, nums, count)
+            assertRange(None, 'kz', nums, count)
+            assertRange('a0', None, nums, count)
+            assertRange('k0', None, nums, count)
+            assertRange('k0', 'k9', nums, count)
 
-        # Test out-of-bounds.
-        assertRange(None, 'a0', [])
-        assertRange('z0', None, [])
-        assertRange('a0', 'a99', [])
-        assertRange('z0', 'z99', [])
+            # Test out-of-bounds.
+            assertRange(None, 'a0', [], count)
+            assertRange('z0', None, [], count)
+            assertRange('a0', 'a99', [], count)
+            assertRange('z0', 'z99', [], count)
 
 
 if __name__ == '__main__':
