@@ -9,10 +9,10 @@ import unittest
 
 import gevent
 
-from clowndb import Client
-from clowndb import CommandError
-from clowndb import Server
-from clowndb import logger
+from greendb import Client
+from greendb import CommandError
+from greendb import Server
+from greendb import logger
 
 
 TEST_HOST = '127.0.0.1'
@@ -22,7 +22,7 @@ TEST_PORT = 31327
 def run_server():
     logger.addHandler(logging.StreamHandler())
     logger.setLevel(logging.ERROR)
-    tmp_dir = tempfile.mkdtemp(suffix='clowndb')
+    tmp_dir = tempfile.mkdtemp(suffix='greendb')
     data_dir = os.path.join(tmp_dir, 'data')
     server = Server(host=TEST_HOST, port=TEST_PORT, path=data_dir,
                     max_dbs=4, dupsort=[3])

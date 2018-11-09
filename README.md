@@ -1,19 +1,17 @@
-![logo](http://media.charlesleifer.com/blog/photos/clowndb-logo.png)
-
-#### clowndb
+#### greendb
 
 network frontend for symas lmdb.
 
 #### installing
 
 ```
-$ pip install clowndb
+$ pip install greendb
 ```
 
 Alternatively, you can install from git:
 
 ```
-$ git clone https://github.com/coleifer/clowndb
-$ cd clowndb
+$ git clone https://github.com/coleifer/greendb
+$ cd greendb
 $ python setup.py install
 ```

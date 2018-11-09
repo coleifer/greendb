@@ -7,15 +7,15 @@ with open(os.path.join(os.path.dirname(__file__), 'README.md')) as fh:
 
 
 setup(
-    name='clowndb',
-    version=__import__('clowndb').__version__,
-    description='clowndb',
+    name='greendb',
+    version=__import__('greendb').__version__,
+    description='greendb',
     long_description=readme,
     author='Charles Leifer',
     author_email='coleifer@gmail.com',
-    url='http://github.com/coleifer/clowndb/',
+    url='http://github.com/coleifer/greendb/',
     packages=[],
-    py_modules=['clowndb'],
+    py_modules=['greendb'],
     classifiers=[
         'Development Status :: 4 - Beta',
         'Environment :: Web Environment',
@@ -24,5 +24,5 @@ setup(
         'Operating System :: OS Independent',
         'Programming Language :: Python',
     ],
-    scripts=['clowndb.py'],
+    scripts=['greendb.py'],
     test_suite='tests')
