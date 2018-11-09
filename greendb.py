@@ -922,7 +922,7 @@ if __name__ == '__main__':
     print('\x1b[32m  .--.')
     print(' /( \x1b[34m@\x1b[33m >\x1b[32m    ,-.  '
           '\x1b[1;32mgreendb '
-          '\x1b[1;33m%s:%s\x1b[32m' % (options.host, options.port))
+          '\x1b[1;33m%s:%s\x1b[32m' % (server._host, server._port))
     print('/ \' .\'--._/  /')
     print(':   ,    , .\'')
     print('\'. (___.\'_/')
