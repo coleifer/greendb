@@ -901,7 +901,7 @@ def configure_logger(options):
 def read_config(config_file):
     if os.path.exists(config_file):
         with open(config_file) as fh:
-            return json.loads(fh)
+            return json.loads(fh.read())
     return {}
 
 
