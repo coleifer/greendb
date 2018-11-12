@@ -189,6 +189,9 @@ class _Socket(object):
         return False
 
     def _send_to_socket(self):
+        if self.is_closed:
+            return
+
         data = self.sendbuf.getvalue()
         self.sendbuf.seek(0)
         self.sendbuf.truncate()
