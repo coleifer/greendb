@@ -326,7 +326,7 @@ class Storage(object):
                  dupsort=False):
         self._path = path
         self._config = {
-            'map_size': DEFAULT_MAP_SIZE,
+            'map_size': map_size,
             'readonly': read_only,
             'metasync': metasync,
             'sync': sync,
@@ -377,6 +377,11 @@ class Storage(object):
         if os.path.exists(self._path):
             shutil.rmtree(self._path)
         return self.open()
+
+    def get_storage_config(self):
+        config = {'path': self._path, 'dupsort': self._dupsort}
+        config.update(self._config)  # Add LMDB config.
+        return config
 
     def stat(self):
         return self.env.stat()
@@ -482,8 +487,8 @@ class Server(object):
         accum = {}
         commands = (
             # Database / environment management.
-            ('ENVINFO', self.env_info),
-            ('ENVSTAT', self.env_stat),
+            ('ENVINFO', self.envinfo),
+            ('ENVSTAT', self.envstat),
             ('FLUSH', self.flush),
             ('FLUSHALL', self.flushall),
             ('STAT', self.stat),
@@ -533,10 +538,17 @@ class Server(object):
         return accum
 
     # Database / environment management.
-    def env_info(self, client):
-        return self.storage.info()
+    def envinfo(self, client):
+        info = self.storage.info()
+        info.update(
+            clients=len(self._pool),
+            host=self._host,
+            port=self._port,
+            max_clients=self._max_clients,
+            storage=self.storage.get_storage_config())
+        return info
 
-    def env_stat(self, client):
+    def envstat(self, client):
         return self.storage.stat()
 
     def flush(self, client):
@@ -902,8 +914,8 @@ class Client(object):
         return method
 
     # Database/schema management.
-    env_info = command('ENVINFO')
-    env_stat = command('ENVSTAT')
+    envinfo = command('ENVINFO')
+    envstat = command('ENVSTAT')
     flush = command('FLUSH')
     flushall = command('FLUSHALL')
     stat = command('STAT')

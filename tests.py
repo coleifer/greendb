@@ -75,6 +75,17 @@ class TestBasicOperations(BaseTestCase):
             self.assertEqual(self.c.set('key', test), 1)
             self.assertEqual(self.c.get('key'), test)
 
+    def test_env_info(self):
+        info = self.c.envinfo()
+        self.assertEqual(info[b'clients'], 1)
+        self.assertEqual(info[b'host'], b'127.0.0.1')
+        self.assertEqual(info[b'port'], TEST_PORT)
+        sc = info[b'storage']
+        self.assertEqual(sc[b'dupsort'], [3])
+        self.assertEqual(sc[b'lock'], 1)
+        self.assertEqual(sc[b'max_dbs'], 4)
+        self.assertEqual(sc[b'sync'], 1)
+
     def test_crud(self):
         # Setting a key/value returns number of keys set.
         self.assertEqual(self.c.set('k1', b'v1'), 1)
