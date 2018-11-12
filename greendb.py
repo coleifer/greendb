@@ -860,7 +860,7 @@ class Server(object):
 
 class Client(object):
     def __init__(self, host='127.0.0.1', port=31337, connect=True,
-                 decode_keys=True):
+                 decode_keys=False):
         self.host = host
         self.port = port
         self._decode_keys = decode_keys
