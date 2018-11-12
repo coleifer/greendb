@@ -839,12 +839,13 @@ class Server(object):
 
 
 class Client(object):
-    def __init__(self, host='127.0.0.1', port=31337):
+    def __init__(self, host='127.0.0.1', port=31337, connect=True):
         self.host = host
         self.port = port
         self._protocol = ProtocolHandler()
         self._sock = None
-        self.connect()
+        if connect:
+            self.connect()
 
     def connect(self):
         if self._sock is not None:
@@ -863,6 +864,13 @@ class Client(object):
         self._sock.close()
         self._sock = None
         return True
+
+    def __enter__(self):
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
     def read_response(self, close_conn=False):
         try:
