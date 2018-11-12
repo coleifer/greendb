@@ -353,13 +353,64 @@ class TestBasicOperations(BaseTestCase):
         self.assertEqual(self.c.prefix('aaa', 3), items[:2])
         self.assertEqual(self.c.prefix('aaa', 1), items[:1])
 
-    def test_getrange(self):
+    def test_deleterange(self):
+        self.c.mset(dict(('k%s' % i, 'v%s' % i) for i in range(20)))
+        self.assertEqual(self.c.deleterange('k18', 'k3'), 4)  # 18, 19, 2, 3.
+        self.assertEqual(self.c.deleterange('k17x', 'k3x'), 0)
+
+        self.assertEqual(self.c.deleterange('k10', 'k15', 2), 2)  # 10, 11.
+        self.assertEqual(self.c.deleterange('k10', 'k15', 2), 2)  # 12, 13.
+        r = self.c.getrange('k0', 'k15')
+        self.assertEqual([k for k, _ in r], [b'k0', b'k1', b'k14', b'k15'])
+        self.assertEqual(self.c.deleterange('k0', 'k15'), 4)
+
+        self.assertEqual(self.c.deleterange(None, 'k0'), 0)
+        self.assertEqual(self.c.deleterange('k9z', None), 0)
+        self.assertEqual(self.c.deleterange('a0', 'a9'), 0)
+        self.assertEqual(self.c.deleterange('z0', 'z9'), 0)
+        self.assertEqual(self.c.deleterange(), 8)
+
+    def test_deleterange_dupsort(self):
+        self.assertEqual(self.c.use(3), 3)  # Use dupsort db.
+        self.c.mset({'k0': 'v0', 'k1': 'v1', 'k10': 'v10', 'k11': 'v11'})
+        self.c.mset({'k0': 'v0-x', 'k10': 'v10-x', 'k11': 'v11-x'})
+        self.c.mset({'k0': 'v0-y', 'k11': 'v11-y'})
+
+        # k0 [v0,v0-x,v0-y], k1 [v1], k10 [v10,v10-x], k11 [v11,v11-x,v11-y]
+        self.assertEqual(self.c.count(), 9)
+        self.assertEqual(self.c.deleterange('k1', 'k9', 2), 2)
+        self.assertEqual([v for _, v in self.c.getrange('k1', 'k9')],
+                         [b'v10-x', b'v11', b'v11-x', b'v11-y'])
+
+        self.assertEqual(self.c.deleterange('k1', 'k9', 3), 3)
+        self.assertEqual([v for _, v in self.c.getrange()],
+                         [b'v0', b'v0-x', b'v0-y', b'v11-y'])
+
+        self.assertEqual(self.c.deleterange(None, None, 2), 2)
+        self.assertEqual([v for _, v in self.c.getrange()],
+                         [b'v0-y', b'v11-y'])
+
+        self.assertEqual(self.c.deleterange(None, None, 4), 2)
+        self.assertEqual(self.c.count(), 0)
+
+    def test_getrange_keys_values(self):
         self.c.mset(dict(('k%s' % i, 'v%s' % i) for i in range(20)))
         sorted_values = list(map(int, sorted(map(str, range(20)))))
+
         def assertRange(start, end, indices, count=None):
-            res = self.c.getrange(start, end, count)
             if count is not None:
                 indices = indices[:count]
+
+            # Test KEYS command.
+            res = self.c.keys(start, end, count)
+            self.assertEqual(res, [b'k%s' % i for i in indices])
+
+            # Test VALUES command.
+            res = self.c.values(start, end, count)
+            self.assertEqual(res, [b'v%s' % i for i in indices])
+
+            # Test GETRANGE command.
+            res = self.c.getrange(start, end, count)
             self.assertEqual(res, [[b'k%s' % i, b'v%s' % i] for i in indices])
 
         for count in (None, 1, 2, 100):
@@ -382,14 +433,13 @@ class TestBasicOperations(BaseTestCase):
             assertRange('a0', 'a99', [], count)
             assertRange('z0', 'z99', [], count)
 
-    def test_getrange_dupsort(self):
+    def test_getrange_keys_values_dupsort(self):
         self.c.use(3)
         nums = [0, 1, 10, 2, 3, 4]
         self.c.mset(dict(('k%s' % i, 'v%s' % i) for i in nums))
         self.c.mset(dict(('k%s' % i, 'v%s-x' % i) for i in nums if i % 2 == 0))
 
         def assertRange(start, end, indices, count=None):
-            res = self.c.getrange(start, end, count)
             accum = []
             for i in indices:
                 accum.append([b'k%s' % i, b'v%s' % i])
@@ -397,7 +447,15 @@ class TestBasicOperations(BaseTestCase):
                     accum.append([b'k%s' % i, b'v%s-x' % i])
             if count is not None:
                 accum = accum[:count]
+
+            res = self.c.getrange(start, end, count)
             self.assertEqual(res, accum)
+
+            res = self.c.keys(start, end, count)
+            self.assertEqual(res, [k for k, _ in accum])
+
+            res = self.c.values(start, end, count)
+            self.assertEqual(res, [v for _, v in accum])
 
         for count in (None, 1, 2, 100):
             assertRange('k2', 'k4', [2, 3, 4], count)

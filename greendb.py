@@ -17,6 +17,7 @@ from socket import error as socket_error
 import datetime
 import json
 import logging
+import operator
 import optparse
 import os
 import shutil
@@ -512,8 +513,12 @@ class Server(object):
             ('MSETNX', self.msetnx),
 
             # Cursor operations.
+            ('DELETERANGE', self.deleterange),
             ('GETRANGE', self.getrange),
+            ('ITEMS', self.getrange),
+            ('KEYS', self.keys),
             ('PREFIX', self.match_prefix),
+            ('VALUES', self.values),
 
             # Client operations.
             ('QUIT', self.client_quit),
@@ -681,7 +686,34 @@ class Server(object):
         return added
 
     # Cursor operations.
-    def getrange(self, client, start=None, stop=None, count=None):
+    def deleterange(self, client, start=None, stop=None, count=None):
+        if count is None:
+            count = 0
+        n = 0
+
+        with client.cursor(write=True) as cursor:
+            if start is None:
+                if not cursor.first():
+                    return n
+            elif not cursor.set_range(start):
+                return n
+
+            while True:
+                key = cursor.key()
+                if stop is not None and key > stop:
+                    break
+
+                if not cursor.delete():
+                    break
+
+                n += 1
+                count -= 1
+                if count == 0:
+                    break
+
+        return n
+
+    def _cursor_op(self, client, start, stop, count, cb, stopcond=operator.gt):
         accum = []
         if count is None:
             count = 0
@@ -694,38 +726,40 @@ class Server(object):
                 return []
 
             while True:
-                key, value = cursor.item()
-                if stop is not None and key > stop:
+                key, data = cb(cursor)
+                if stop is not None and stopcond(key, stop):
                     break
-                accum.append((key, munpackb(value)))
+                accum.append(data)
                 count -= 1
                 if count == 0 or not cursor.next():
                     break
 
         return accum
+
+    def getrange(self, client, start=None, stop=None, count=None):
+        def cb(cursor):
+            key, value = cursor.item()
+            return key, (key, munpackb(value))
+        return self._cursor_op(client, start, stop, count, cb)
+
+    def keys(self, client, start=None, stop=None, count=None):
+        def cb(cursor):
+            key = cursor.key()
+            return key, key
+        return self._cursor_op(client, start, stop, count, cb)
+
+    def values(self, client, start=None, stop=None, count=None):
+        def cb(cursor):
+            key, value = cursor.item()
+            return key, munpackb(value)
+        return self._cursor_op(client, start, stop, count, cb)
 
     def match_prefix(self, client, prefix, count=None):
-        accum = []
-        if count is None:
-            count = 0
-
-        with client.cursor() as cursor:
-            if not prefix:
-                if not cursor.first():
-                    return []
-            elif not cursor.set_range(prefix):
-                return []
-
-            while True:
-                key, value = cursor.item()
-                if not key.startswith(prefix):
-                    break
-                accum.append((key, munpackb(value)))
-                count -= 1
-                if count == 0 or not cursor.next():
-                    break
-
-        return accum
+        def cb(cursor):
+            key, value = cursor.item()
+            return key, (key, munpackb(value))
+        stopcond = lambda k, p: not k.startswith(p)
+        return self._cursor_op(client, prefix, prefix, count, cb, stopcond)
 
     # Client operations.
     def client_quit(self, client):
@@ -885,8 +919,12 @@ class Client(object):
     msetnx = command('MSETNX')
 
     # Cursor operations.
+    deleterange = command('DELETERANGE')
     getrange = command('GETRANGE')
+    items = command('ITEMS')
+    keys = command('KEYS')
     prefix = command('PREFIX')
+    values = command('VALUES')
 
     # Client operations.
     quit = command('QUIT')
