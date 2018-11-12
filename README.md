@@ -1,3 +1,5 @@
+![](http://media.charlesleifer.com/blog/photos/logo-0.png)
+
 ### greendb
 
 server frontend for symas lmdb.
