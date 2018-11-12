@@ -54,6 +54,14 @@ def decode(s):
     else:
         return str(s)
 
+def decode_dict(d):
+    accum = {}
+    for key, value in d.items():
+        if isinstance(value, dict):
+            value = decode_dict(value)
+        accum[decode(key)] = value
+    return accum
+
 
 CRLF = b'\r\n'
 READSIZE = 4 * 1024
@@ -851,9 +859,11 @@ class Server(object):
 
 
 class Client(object):
-    def __init__(self, host='127.0.0.1', port=31337, connect=True):
+    def __init__(self, host='127.0.0.1', port=31337, connect=True,
+                 decode_keys=True):
         self.host = host
         self.port = port
+        self._decode_keys = decode_keys
         self._protocol = ProtocolHandler()
         self._sock = None
         if connect:
@@ -898,6 +908,8 @@ class Client(object):
                 self._sock.close()
         if isinstance(resp, Error):
             raise CommandError(decode(resp.message))
+        if self._decode_keys and isinstance(resp, dict):
+            resp = decode_dict(resp)
         return resp
 
     def execute(self, *args):

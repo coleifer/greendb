@@ -86,6 +86,23 @@ class TestBasicOperations(BaseTestCase):
         self.assertEqual(sc[b'max_dbs'], 4)
         self.assertEqual(sc[b'sync'], 1)
 
+    def test_decode_keys(self):
+        c = Client(host=TEST_HOST, port=TEST_PORT, decode_keys=True)
+        c.mset({'k1': 'v1', 'k2': {'x1': 'y1', 'x2': {'y2': 'z2'}}})
+        c.mset({'i1': {1: 2}, 'k3': ['foo', {'a': 'b'}, 'bar']})
+
+        # Dicts are decoded recursively.
+        self.assertEqual(c.mget(['k1', 'k2']), {
+            u'k1': b'v1',
+            u'k2': {u'x1': b'y1', u'x2': {u'y2': b'z2'}}})
+
+        # Nested dicts are not decoded.
+        self.assertEqual(c.get('k3'), [b'foo', {b'a': b'b'}, b'bar'])
+
+        # ints and other values are modified, as keys must be strings.
+        self.assertEqual(c.get('i1'), {u'1': 2})
+        c.close()
+
     def test_crud(self):
         # Setting a key/value returns number of keys set.
         self.assertEqual(self.c.set('k1', b'v1'), 1)
