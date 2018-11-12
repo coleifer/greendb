@@ -319,7 +319,7 @@ class TestBasicOperations(BaseTestCase):
             r = self.c.prefix(prefix, count)
             if count is not None:
                 indices = indices[:count]
-            self.assertEqual(r, [[b'k%03d' % i, b'v%s' % i] for i in indices])
+            self.assertEqual(r, [[b'k%03d' % i, b'v%d' % i] for i in indices])
 
         for count in (None, 1, 2, 100):
             # Prefix scan works as expected.
@@ -403,15 +403,15 @@ class TestBasicOperations(BaseTestCase):
 
             # Test KEYS command.
             res = self.c.keys(start, end, count)
-            self.assertEqual(res, [b'k%s' % i for i in indices])
+            self.assertEqual(res, [b'k%d' % i for i in indices])
 
             # Test VALUES command.
             res = self.c.values(start, end, count)
-            self.assertEqual(res, [b'v%s' % i for i in indices])
+            self.assertEqual(res, [b'v%d' % i for i in indices])
 
             # Test GETRANGE command.
             res = self.c.getrange(start, end, count)
-            self.assertEqual(res, [[b'k%s' % i, b'v%s' % i] for i in indices])
+            self.assertEqual(res, [[b'k%d' % i, b'v%d' % i] for i in indices])
 
         for count in (None, 1, 2, 100):
             assertRange('k3', 'k6', [3, 4, 5, 6], count)
@@ -442,9 +442,9 @@ class TestBasicOperations(BaseTestCase):
         def assertRange(start, end, indices, count=None):
             accum = []
             for i in indices:
-                accum.append([b'k%s' % i, b'v%s' % i])
+                accum.append([b'k%d' % i, b'v%d' % i])
                 if i % 2 == 0:
-                    accum.append([b'k%s' % i, b'v%s-x' % i])
+                    accum.append([b'k%d' % i, b'v%d-x' % i])
             if count is not None:
                 accum = accum[:count]
 

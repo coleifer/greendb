@@ -521,6 +521,7 @@ class Server(object):
             ('VALUES', self.values),
 
             # Client operations.
+            ('SLEEP', self.client_sleep),
             ('QUIT', self.client_quit),
             ('SHUTDOWN', self.shutdown),
         )
@@ -762,6 +763,10 @@ class Server(object):
         return self._cursor_op(client, prefix, prefix, count, cb, stopcond)
 
     # Client operations.
+    def client_sleep(self, client, timeout=1):
+        gevent.sleep(timeout)
+        return timeout
+
     def client_quit(self, client):
         raise ClientQuit('client closed connection')
 
@@ -927,6 +932,7 @@ class Client(object):
     values = command('VALUES')
 
     # Client operations.
+    _sleep = command('SLEEP')
     quit = command('QUIT')
     shutdown = command('SHUTDOWN')
 
