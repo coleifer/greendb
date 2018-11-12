@@ -14,7 +14,8 @@ from greendb import Client
 def get_sleep_set(k, v, n=1):
     client = Client()
     client.set(k, v)
-    time.sleep(n)
+    #time.sleep(n)
+    client._sleep(n)
     assert client.get(k) == v
     client.close()
 
