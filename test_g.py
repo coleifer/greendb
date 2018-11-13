@@ -26,7 +26,7 @@ start = time.time()
 
 greenlets = []
 for i in range(t):
-    greenlets.append(gevent.spawn(get_sleep_set, 'k%d' % i, 'v%d' % i, n))
+    greenlets.append(gevent.spawn(get_sleep_set, b'k%d' % i, b'v%d' % i, n))
 
 for g in greenlets:
     g.join()
