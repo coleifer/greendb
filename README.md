@@ -2,7 +2,7 @@
 
 ### greendb
 
-server frontend for symas lmdb.
+async server frontend for symas lmdb.
 
 #### installing
 
@@ -17,6 +17,12 @@ $ git clone https://github.com/coleifer/greendb
 $ cd greendb
 $ python setup.py install
 ```
+
+Dependencies:
+
+* [gevent](http://www.gevent.org/)
+* [lmdb](https://github.com/dw/py-lmdb)
+* [msgpack-python](https://github.com/msgpack/msgpack-python)
 
 #### running
 
@@ -79,7 +85,7 @@ Example custom configuration:
 }
 ```
 
-#### client
+### client
 
 A Python client is included in the `greendb` module. All server commands are
 implemented as client methods using the lower-case command name, for example:
@@ -116,7 +122,7 @@ application should maintain a separate connection for each thread/greenlet.
 Future work may remove this necessity by switching to a library-managed
 connection pool.
 
-#### command reference
+### command reference
 
 Below is the list of supported commands. **Commands are available on the client
 using the lower-case command name as the method name**.
