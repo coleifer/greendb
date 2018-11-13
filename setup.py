@@ -8,7 +8,7 @@ with open(os.path.join(os.path.dirname(__file__), 'README.md')) as fh:
 try:
     version = __import__('greendb').__version__
 except ImportError:
-    version = '0.1.0'
+    version = '0.1.1'
 
 
 setup(
