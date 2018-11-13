@@ -267,20 +267,20 @@ using the lower-case command name as the method name**.
   <tr>
     <td>MDELETE</td>
     <td>delete multiple keys</td>
-    <td>list of keys to delete</td>
+    <td>list of keys</td>
     <td>int: number of keys deleted</td>
   </tr>
   <tr>
     <td>MGET</td>
     <td>get the value of multiple keys</td>
-    <td>list of keys to get</td>
+    <td>list of keys</td>
     <td>dict of key and value. Keys that were requested, but which do not
     exist are not included in the response.</td>
   </tr>
   <tr>
     <td>MGETDUP</td>
     <td>get all values of multiple keys (requires dupsort)</td>
-    <td>list of keys to get</td>
+    <td>list of keys</td>
     <td>dict of key to list of values. Keys that were requested, but which do
     not exist, are not included in the response.</td>
   </tr>
