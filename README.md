@@ -64,3 +64,292 @@ Config file example with defaults -- remove comments before using:
   "dupsort": false  // Either a boolean or a list of DB indexes.
 }
 ```
+
+Example custom configuration:
+
+* 1GB max database size
+* dupsort enabled on databases 10 - 15
+* data stored in /var/lib/greendb/data
+
+```javascript
+{
+  "map_size": 1048576000,
+  "dupsort": [10, 11, 12, 13, 14, 15],
+  "path": "/var/lib/greendb/data/"
+}
+```
+
+#### client
+
+A Python client is included in the `greendb` module. All server commands are
+implemented as client methods using the lower-case command name, for example:
+
+```python
+
+from greendb import Client
+client = Client(host='10.0.0.3')
+
+# Execute the ENVINFO command.
+print(client.envinfo())
+
+# Set multiple key/value pairs, read a key, then delete two keys.
+client.mset({'k1': 'v1', 'k2': 'v2'})  # MSET
+print(client.get('k1'))  # GET
+client.mdelete(['k1', 'k2'])  # MDELETE
+```
+
+Additionally, the `Client` implements much of the Python `dict` interface, such
+as item get/set/delete, iteration, length, contains, etc.
+
+If an error occurs, either due to a malformed command (e.g., missing required
+parameters) or for any other reason (e.g., attempting to write to a read-only
+database), then a `CommandError` will be raised by the client with a message
+indicating what caused the error.
+
+**A note about connections**: the greendb client will automatically connect to
+the server unless you instantiate it with `connect=False`. A new connection can
+be opened using the `connect()` method, and closed using `close()`. The client
+can be also used as a context manager.
+
+In a multi-threaded or multi-greenlet application (e.g. a web app), the
+application should maintain a separate connection for each thread/greenlet.
+Future work may remove this necessity by switching to a library-managed
+connection pool.
+
+#### command reference
+
+Below is the list of supported commands. **Commands are available on the client
+using the lower-case command name as the method name**.
+
+<table>
+  <thead>
+    <th>command</th>
+    <th>description</th>
+    <th>arguments</th>
+    <th>return value</th>
+  </thead>
+  <tr>
+    <td>ENVINFO</td>
+    <td>metadata and storage configuration settings</td>
+    <td>(none)</td>
+    <td>dict</td>
+  </tr>
+  <tr>
+    <td>ENVSTAT</td>
+    <td>metadata related to the global b-tree</td>
+    <td>(none)</td>
+    <td>dict</td>
+  </tr>
+  <tr>
+    <td>FLUSH</td>
+    <td>delete all records in the currently-selected database</td>
+    <td>(none)</td>
+    <td>boolean indicating success</td>
+  </tr>
+  <tr>
+    <td>FLUSHALL</td>
+    <td>delete all records in all databases</td>
+    <td>(none)</td>
+    <td>dict mapping database index to boolean</td>
+  </tr>
+  <tr>
+    <td>STAT</td>
+    <td>metadata related to the currently-selected database b-tree</td>
+    <td>(none)</td>
+    <td>dict</td>
+  </tr>
+  <tr>
+    <td>SYNC</td>
+    <td>synchronize database to disk (use when sync=False)</td>
+    <td>(none)</td>
+    <td>(none)</td>
+  </tr>
+  <tr>
+    <td>USEDB</td>
+    <td>select the given database</td>
+    <td>database index, 0 through (max_dbs - 1)</td>
+    <td>int: active database index</td>
+  </tr>
+  <tr>
+    <td>COUNT</td>
+    <td>get the number of key/value pairs in active database</td>
+    <td>(none)</td>
+    <td>int</td>
+  </tr>
+  <tr>
+    <td>DELETE</td>
+    <td>delete a key and any associated value(s)</td>
+    <td>key to delete</td>
+    <td>int: number of keys removed (1 on success, 0 if key not found)</td>
+  </tr>
+  <tr>
+    <td>DELETEDUP</td>
+    <td>delete a particular key/value pair when dupsort is enabled</td>
+    <td>key, value to delete</td>
+    <td>int: number of key+value removed (1 on success, 0 if key+value not found)</td>
+  </tr>
+  <tr>
+    <td>DUPCOUNT</td>
+    <td>get number of values stored at the given key (requires dupsort)</td>
+    <td>key</td>
+    <td>int: number of values, or None if key does not exist</td>
+  </tr>
+  <tr>
+    <td>EXISTS</td>
+    <td>determine if the given key exists</td>
+    <td>key</td>
+    <td>bool</td>
+  </tr>
+  <tr>
+    <td>GET</td>
+    <td>get the value associated with a given key. If dupsort is enabled and
+    multiple values are present, the one that is sorted first will be returned.</td>
+    <td>key</td>
+    <td>value or None</td>
+  </tr>
+  <tr>
+    <td>GETDUP</td>
+    <td>get all values associated with a given key (requires dupsort)</td>
+    <td>key</td>
+    <td>list of values or None if key does not exist</td>
+  </tr>
+  <tr>
+    <td>POP</td>
+    <td>atomically get and delete the value at a given key. If dupsort is
+    enabled and multiple values are present, the one that is sorted first will
+    be removed and returned.</td>
+    <td>key</td>
+    <td>value or None</td>
+  </tr>
+  <tr>
+    <td>REPLACE</td>
+    <td>atomically get and set the value at a given key. If dupsort is enabled,
+    the first value will be returned (if exists) and ALL values will be removed
+    so that only the new value is stored.</td>
+    <td>key</td>
+    <td>previous value or None</td>
+  </tr>
+  <tr>
+    <td>SET</td>
+    <td>store a key/value pair. If dupsort is enabled, duplicate values will be
+    stored at the given key in sorted-order. Additionally, if dupsort is
+    enabled and the exact key/value pair already exist, no changes are made.</td>
+    <td>key, value</td>
+    <td>int: 1 if new key/value added, 0 if dupsort is enabled and the
+    key/value already exist</td>
+  </tr>
+  <tr>
+    <td>SETDUP</td>
+    <td>store a key/value pair, treating duplicates as successful writes
+    (requires dupsort). Unlike SET, if the exact key/value pair already exists,
+    this command will return 1 indicating success.</td>
+    <td>key, value</td>
+    <td>int: 1 on success</td>
+  </tr>
+  <tr>
+    <td>SETNX</td>
+    <td>store a key/value pair only if the key does not exist</td>
+    <td>key, value</td>
+    <td>int: 1 on success, 0 if key already exists</td>
+  </tr>
+  <tr>
+    <td>MDELETE</td>
+    <td>delete multiple keys</td>
+    <td>list of keys to delete</td>
+    <td>int: number of keys deleted</td>
+  </tr>
+  <tr>
+    <td>MGET</td>
+    <td>get the value of multiple keys</td>
+    <td>list of keys to get</td>
+    <td>dict of key and value. Keys that were requested, but which do not
+    exist are not included in the response.</td>
+  </tr>
+  <tr>
+    <td>MGETDUP</td>
+    <td>get all values of multiple keys (requires dupsort)</td>
+    <td>list of keys to get</td>
+    <td>dict of key to list of values. Keys that were requested, but which do
+    not exist, are not included in the response.</td>
+  </tr>
+  <tr>
+    <td>MPOP</td>
+    <td>atomically get and delete the value of multiple keys. If dupsort is
+    enabled and multiple values are stored at a given key, only the first value
+    will be removed.</td>
+    <td>list of keys</td>
+    <td>dict of key to value</td>
+  </tr>
+  <tr>
+    <td>MREPLACE</td>
+    <td>atomically get and set the value of multiple keys. If dupsort is
+    enabled and multiple values are stored at a given key, only the first value
+    will be returned and all remaining values discarded.</td>
+    <td>dict of key to value</td>
+    <td>dict of key to previous value. Keys that did not exist previously will
+    not be included in the response.</td>
+  </tr>
+  <tr>
+    <td>MSET</td>
+    <td>set the value of multiple keys.</td>
+    <td>dict of key to value</td>
+    <td>int: number of key / value pairs set</td>
+  </tr>
+  <tr>
+    <td>MSETDUP</td>
+    <td>store multiple key/value pairs, treating duplicates as successful
+    writes (requires dupsort). Unlike MSET, if the exact key/value pair already
+    exists, this command will treat the write as a success.</td>
+    <td>dict of key to value</td>
+    <td>int: number of key / value pairs set</td>
+  </tr>
+  <tr>
+    <td>MSETNX</td>
+    <td>store multiple key/value pair only if the key does not exist</td>
+    <td>dict of key to value</td>
+    <td>int: number of key / value pairs set</td>
+  </tr>
+  <tr>
+    <td>DELETERANGE</td>
+    <td>delete a range of keys using optional inclusive start/end-points</td>
+    <td>start key (optional), end key (optional), count (optional)</td>
+    <td>int: number of keys deleted</td>
+  </tr>
+  <tr>
+    <td>GETRANGE</td>
+    <td>retrieve a range of key/value pairs using optional inclusive
+    start/end-points</td>
+    <td>start key (optional), end key (optional), count (optional)</td>
+    <td>list of [key, value] lists</td>
+  </tr>
+  <tr>
+    <td>KEYS</td>
+    <td>retrieve a range of keys using optional inclusive start/end-points</td>
+    <td>start key (optional), end key (optional), count (optional)</td>
+    <td>list of keys</td>
+  </tr>
+  <tr>
+    <td>PREFIX</td>
+    <td>retrieve a range of key/value pairs which match the given prefix</td>
+    <td>prefix, count (optional)</td>
+    <td>list of [key, value] lists</td>
+  </tr>
+  <tr>
+    <td>VALUES</td>
+    <td>retrieve a range of values using optional inclusive start/end-points</td>
+    <td>start key (optional), end key (optional), count (optional)</td>
+    <td>list of values</td>
+  </tr>
+  <tr>
+    <td>QUIT</td>
+    <td>disconnect from server</td>
+    <td>(none)</td>
+    <td>int: 1</td>
+  </tr>
+  <tr>
+    <td>SHUTDOWN</td>
+    <td>terminate server process from client (be careful!)</td>
+    <td>(none)</td>
+    <td>(none)</td>
+  </tr>
+</table>

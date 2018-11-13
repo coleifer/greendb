@@ -420,7 +420,8 @@ class Storage(object):
     def flush(self, db):
         db_handle = self.databases[db]
         with self.db(db, True) as txn:
-            return txn.drop(db_handle, delete=False)
+            txn.drop(db_handle, delete=False)
+        return True
 
     def flushall(self):
         return dict((db, self.flush(db)) for db in self.databases)
@@ -520,7 +521,6 @@ class Server(object):
             # Bulk K/V operations.
             ('MDELETE', self.mdelete),
             ('MGET', self.mget),
-            ('MGETDUP', self.mget),
             ('MGETDUP', self.mgetdup),
             ('MPOP', self.mpop),
             ('MREPLACE', self.mreplace),
