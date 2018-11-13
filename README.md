@@ -165,7 +165,7 @@ using the lower-case command name as the method name**.
     <td>(none)</td>
   </tr>
   <tr>
-    <td>USEDB</td>
+    <td>USE</td>
     <td>select the given database</td>
     <td>database index, 0 through (max_dbs - 1)</td>
     <td>int: active database index</td>

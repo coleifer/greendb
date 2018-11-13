@@ -502,7 +502,7 @@ class Server(object):
             ('FLUSHALL', self.flushall),
             ('STAT', self.stat),
             ('SYNC', self.sync),
-            ('USEDB', self.use_db),
+            ('USE', self.use_db),
 
             # K/V operations.
             ('COUNT', self.count),
@@ -932,7 +932,7 @@ class Client(object):
     flushall = command('FLUSHALL')
     stat = command('STAT')
     sync = command('SYNC')
-    use = command('USEDB')
+    use = command('USE')
 
     # Basic k/v operations.
     count = command('COUNT')
