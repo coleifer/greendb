@@ -171,6 +171,9 @@ using the lower-case command name as the method name**.
     <td>int: active database index</td>
   </tr>
   <tr>
+    <th>KV commands</th>
+  </tr>
+  <tr>
     <td>COUNT</td>
     <td>get the number of key/value pairs in active database</td>
     <td>(none)</td>
@@ -253,6 +256,9 @@ using the lower-case command name as the method name**.
     <td>int: 1 on success, 0 if key already exists</td>
   </tr>
   <tr>
+    <th>Bulk KV commands</th>
+  </tr>
+  <tr>
     <td>MDELETE</td>
     <td>delete multiple keys</td>
     <td>list of keys to delete</td>
@@ -310,6 +316,9 @@ using the lower-case command name as the method name**.
     <td>int: number of key / value pairs set</td>
   </tr>
   <tr>
+    <th>Cursor / range commands</th>
+  </tr>
+  <tr>
     <td>DELETERANGE</td>
     <td>delete a range of keys using optional inclusive start/end-points</td>
     <td>start key (optional), end key (optional), count (optional)</td>
@@ -339,6 +348,9 @@ using the lower-case command name as the method name**.
     <td>retrieve a range of values using optional inclusive start/end-points</td>
     <td>start key (optional), end key (optional), count (optional)</td>
     <td>list of values</td>
+  </tr>
+  <tr>
+    <th>Client commands</th>
   </tr>
   <tr>
     <td>QUIT</td>
