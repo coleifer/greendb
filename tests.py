@@ -75,6 +75,29 @@ class TestBasicOperations(BaseTestCase):
             self.assertEqual(self.c.set('key', test), 1)
             self.assertEqual(self.c.get('key'), test)
 
+    def test_dict_interface(self):
+        self.c['k1'] = 'v1'
+        self.assertEqual(self.c['k1'], b'v1')
+        self.assertFalse('k2' in self.c)
+        self.c['k2'] = 'v2'
+        self.assertTrue('k2' in self.c)
+        self.assertEqual(list(self.c), [b'k1', b'k2'])
+        self.assertEqual(len(self.c), 2)
+        del self.c['k2']
+        self.assertFalse('k2' in self.c)
+        self.assertEqual(len(self.c), 1)
+
+        self.c.update(k2='v2', k3='v3')
+        self.assertEqual(self.c[:'k2'], [[b'k1', b'v1'], [b'k2', b'v2']])
+        self.assertEqual(self.c['k1':'k2x'], [[b'k1', b'v1'], [b'k2', b'v2']])
+        self.assertEqual(self.c['k1x':], [[b'k2', b'v2'], [b'k3', b'v3']])
+        self.assertEqual(self.c['k1x'::1], [[b'k2', b'v2']])
+
+        del self.c['k1x'::1]
+        self.assertEqual(list(self.c), [b'k1', b'k3'])
+        del self.c['k1', 'k2', 'k3', 'k4']
+        self.assertEqual(list(self.c), [])
+
     def test_env_info(self):
         info = self.c.envinfo()
         self.assertEqual(info[b'clients'], 1)

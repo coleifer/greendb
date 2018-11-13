@@ -971,6 +971,38 @@ class Client(object):
     quit = command('QUIT')
     shutdown = command('SHUTDOWN')
 
+    def __setitem__(self, key, value):
+        self.set(key, value)
+
+    def __getitem__(self, item):
+        if isinstance(item, slice):
+            return self.getrange(item.start, item.stop, item.step)
+        elif isinstance(item, (list, tuple)):
+            return self.mget(item)
+        return self.get(item)
+
+    def __delitem__(self, item):
+        if isinstance(item, slice):
+            self.deleterange(item.start, item.stop, item.step)
+        elif isinstance(item, (list, tuple)):
+            self.mdelete(item)
+        else:
+            self.delete(item)
+
+    __len__ = count
+    __contains__ = exists
+
+    def update(self, __data=None, **kwargs):
+        if __data is not None:
+            params = __data
+            params.update(kwargs)
+        else:
+            params = kwargs
+        return self.mset(params)
+
+    def __iter__(self):
+        return iter(self.keys())
+
 
 def get_option_parser():
     parser = optparse.OptionParser()
