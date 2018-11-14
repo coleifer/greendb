@@ -421,6 +421,6 @@ using the lower-case command name as the method name**.
 #### protocol
 
 The protocol is based on the Redis protocol, and includes the addition of a
-dedicated dictionary type, denoted by a `%`, and a floating-point type, denoted
-by a `~`. For details, see [redis protocol documentation](https://redis.io/topics/protocol)
+dedicated dictionary type, denoted by a `%`, a floating-point type, denoted by
+a `~`, and a unicode text type denoted by `^`. For details, see [redis protocol documentation](https://redis.io/topics/protocol)
 or refer to the [greendb ProtocolHandler code](https://github.com/coleifer/greendb/blob/master/greendb.py).
