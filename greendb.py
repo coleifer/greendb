@@ -1140,6 +1140,19 @@ def get_option_parser():
                       help='Port to listen on.', type=int)
     parser.add_option('-r', '--reset', action='store_true', dest='reset',
                       help='Reset database and config. All data will be lost.')
+    parser.add_option('-S', '--no-sync', action='store_true', dest='no_sync',
+                      help=('Do not flush system buffers to disk when '
+                            'committing a transaction. Use with caution.'))
+    parser.add_option('-M', '--no-metasync', action='store_true',
+                      dest='no_metasync', help=(
+                          'Flush system buffers to disk only once per '
+                          'transaction, omit the metadata flush.'))
+    parser.add_option('-W', '--writemap', action='store_true', dest='writemap',
+                      help='Use a writeable memory map.')
+    parser.add_option('-A', '--map-async', action='store_true',
+                      dest='map_async', help=(
+                          'When used with "--writemap" (-W), use asynchronous '
+                          'flushes to disk.'))
     return parser
 
 
@@ -1161,6 +1174,11 @@ def read_config(config_file):
             return json.loads(fh.read())
     return {}
 
+def print_config(conf):
+    for key, value in sorted(conf.items()):
+        if value is not None:
+            print('%s=%s' % (key, value))
+
 
 if __name__ == '__main__':
     options, args = get_option_parser().parse_args()
@@ -1174,6 +1192,10 @@ if __name__ == '__main__':
     config.setdefault('port', options.port)
     config.setdefault('max_clients', options.max_clients)
     config.setdefault('path', options.data_dir)
+    config.setdefault('sync', not options.no_sync)
+    config.setdefault('metasync', not options.no_metasync)
+    config.setdefault('writemap', options.writemap)
+    config.setdefault('map_async', options.map_async)
     server = Server(**config)
 
     print('\x1b[32m  .--.')
@@ -1184,6 +1206,7 @@ if __name__ == '__main__':
     print(':   ,    , .\'')
     print('\'. (___.\'_/')
     print(' \x1b[33m((\x1b[32m-\x1b[33m((\x1b[32m-\'\'\x1b[0m')
+    print_config(config)
     try:
         server.run()
     except KeyboardInterrupt:

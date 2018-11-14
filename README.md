@@ -69,6 +69,13 @@ Options:
                         Maximum number of clients.
   -p PORT, --port=PORT  Port to listen on.
   -r, --reset           Reset database and config. All data will be lost.
+  -S, --no-sync         Do not flush system buffers to disk when committing a
+                        transaction. Use with caution.
+  -M, --no-metasync     Flush system buffers to disk only once per
+                        transaction, omit the metadata flush.
+  -W, --writemap        Use a writeable memory map.
+  -A, --map-async       When used with "--writemap" (-W), use asynchronous
+                        flushes to disk.
 ```
 
 Config file example with defaults -- remove comments before using:
