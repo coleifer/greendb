@@ -129,10 +129,8 @@ the server unless you instantiate it with `connect=False`. A new connection can
 be opened using the `connect()` method, and closed using `close()`. The client
 can be also used as a context manager.
 
-In a multi-threaded or multi-greenlet application (e.g. a web app), the
-application should maintain a separate connection for each thread/greenlet.
-Future work may remove this necessity by switching to a library-managed
-connection pool.
+In a multi-threaded or multi-greenlet application (e.g. a web app), the client
+will maintain a separate connection for each thread/greenlet.
 
 ### command reference
 

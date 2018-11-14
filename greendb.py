@@ -15,6 +15,7 @@ from functools import wraps
 from io import BytesIO
 from socket import error as socket_error
 import datetime
+import heapq
 import json
 import logging
 import operator
@@ -898,54 +899,95 @@ class Server(object):
         return self._commands[command](client, *data[1:])
 
 
+class SocketPool(object):
+    def __init__(self, host, port, max_age=60):
+        self.host = host
+        self.port = port
+        self.max_age = max_age
+        self.free = []
+        self.in_use = {}
+
+    def checkout(self):
+        now = time.time()
+        tid = get_ident()
+        if tid in self.in_use:
+            sock = self.in_use[tid]
+            if sock.is_closed:
+                del self.in_use[tid]
+            else:
+                return sock
+
+        while self.free:
+            ts, sock = heapq.heappop(self.free)
+            if ts < now - self.max_age:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+            else:
+                self.in_use[tid] = sock
+                return sock
+
+        sock = self.in_use[tid] = self.create_socket()
+        return sock
+
+    def create_socket(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        sock.connect((self.host, self.port))
+        return _Socket(sock)
+
+    def checkin(self):
+        tid = get_ident()
+        if tid in self.in_use:
+            sock = self.in_use.pop(tid)
+            if not sock.is_closed:
+                heapq.heappush(self.free, (time.time(), sock))
+            return True
+        return False
+
+    def __enter__(self):
+        return self.checkout()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.checkin()
+
+    def close(self):
+        tid = get_ident()
+        sock = self.in_use.pop(tid, None)
+        if sock:
+            try:
+                sock.close()
+            except OSError:
+                pass
+            return True
+        return False
+
+
 class Client(object):
-    def __init__(self, host='127.0.0.1', port=31337, connect=True,
-                 decode_keys=False):
+    def __init__(self, host='127.0.0.1', port=31337, decode_keys=False,
+                 pool_max_age=60):
         self.host = host
         self.port = port
         self._decode_keys = decode_keys
         self._protocol = ProtocolHandler()
-        self._sock = None
-        if connect:
-            self.connect()
-
-    def connect(self):
-        if self._sock is not None:
-            self._sock.close()
-
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        sock.connect((self.host, self.port))
-        self._sock = _Socket(sock)
-        return True
+        self._socket_pool = SocketPool(host, port, pool_max_age)
 
     def close(self):
-        if self._sock is None:
-            return False
+        return self._socket_pool.close()
 
-        self._sock.close()
-        self._sock = None
-        return True
-
-    def __enter__(self):
-        self.connect()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
-
-    def read_response(self, close_conn=False):
+    def read_response(self, conn, close_conn=False):
         try:
-            resp = self._protocol.handle(self._sock)
+            resp = self._protocol.handle(conn)
         except EOFError:
-            self._sock.close()
+            conn.close()
             raise ConnectionError('server went away')
         except Exception:
-            self._sock.close()
+            conn.close()
             raise ServerInternalError('internal server error')
         else:
             if close_conn:
-                self._sock.close()
+                conn.close()
         if isinstance(resp, Error):
             raise CommandError(decode(resp.message))
         if self._decode_keys and isinstance(resp, dict):
@@ -953,12 +995,10 @@ class Client(object):
         return resp
 
     def execute(self, *args):
-        if self._sock is None:
-            raise ConnectionError('not connected!')
-
-        close_conn = args[0] in (b'QUIT', b'SHUTDOWN')
-        self._protocol.write_response(self._sock, args)
-        return self.read_response(close_conn)
+        with self._socket_pool as conn:
+            close_conn = args[0] in (b'QUIT', b'SHUTDOWN')
+            self._protocol.write_response(conn, args)
+            return self.read_response(conn, close_conn)
 
     def command(cmd):
         def method(self, *args):
