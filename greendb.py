@@ -74,10 +74,6 @@ def decode_bulk_dict(d):
     return accum
 
 
-CRLF = b'\r\n'
-READSIZE = 4 * 1024
-
-
 class ClientQuit(Exception): pass
 class Shutdown(Exception): pass
 
@@ -95,6 +91,9 @@ class CommandError(Exception):
 
 
 Error = namedtuple('Error', ('message',))
+
+CRLF = b'\r\n'
+READSIZE = 4 * 1024
 
 
 class _Socket(object):
