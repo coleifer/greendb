@@ -70,6 +70,8 @@ class TestBasicOperations(BaseTestCase):
             3.14159,
             [b'foo', b'\xff\x00\xff', 31337, [b'bar']],
             {b'k1': b'v1', b'k2': 2, b'k3': {b'x3': b'y3'}},
+            True,
+            False,
             None,
             b'',
             b'a' * (1024 * 1024),  # 1MB value.
@@ -603,6 +605,19 @@ class TestBasicOperations(BaseTestCase):
         self.assertFalse(self.c.cas('k3', b'x3', b'y3'))
         self.assertTrue(self.c.cas('k3', None, b'v3'))
         self.assertEqual(self.c.getdup('k3'), [b'v3'])
+
+    def test_length(self):
+        self.c.set('k1', b'abc')
+        self.c.set('k2', 'defghijkl')
+        self.c.set('k3', b'')
+        self.c.set('k4', [0, 1, 2, 3])
+        self.c.set('k5', {'x': 'y', 'z': 'w'})
+        self.assertEqual(self.c.length('k1'), 3)
+        self.assertEqual(self.c.length('k2'), 9)
+        self.assertEqual(self.c.length('k3'), 0)
+        self.assertEqual(self.c.length('k4'), 4)
+        self.assertEqual(self.c.length('k5'), 2)
+        self.assertTrue(self.c.length('kx') is None)
 
 
 if __name__ == '__main__':

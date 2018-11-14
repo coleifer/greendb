@@ -7,14 +7,25 @@ async server frontend for symas lmdb.
 #### description
 
 greendb is a lightweight server (and Python client) for symas lmdb. The server
-uses a variant of the Redis protocol, extended to support dictionaries and
-floating-point numbers as first-class data-types.
+uses a variant of the Redis protocol, extended to support dictionaries,
+floating-point numbers, and UTF8-encoded text as first-class data-types.
 
 greendb supports multiple independent databases, much like Redis. Values are
 serialized using `msgpack`, so the server is capable of storing all the
 data-types supported by msgpack. greendb also provides per-database
 configuration of multi-value support, allowing you to efficiently store
 multiple values at a given key, in sorted order (e.g. for secondary indexes).
+
+With greendb, database keys are always bytestrings. Values may be:
+
+* dict
+* list
+* unicode text
+* bytestrings
+* integers
+* floating-point
+* boolean
+* `None`
 
 #### installing
 
@@ -249,6 +260,13 @@ using the lower-case command name as the method name**.
     <td>get all values associated with a given key (requires dupsort)</td>
     <td>key</td>
     <td>list of values or None if key does not exist</td>
+  </tr>
+  <tr>
+    <td>LENGTH</td>
+    <td>get the length of the value stored at a given key, e.g. for a string
+    this returns the number of characters, for a list the number of items, etc.</td>
+    <td>key</td>
+    <td>length of value or None if key does not exist</td>
   </tr>
   <tr>
     <td>POP</td>
