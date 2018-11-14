@@ -109,6 +109,22 @@ class TestBasicOperations(BaseTestCase):
         self.assertEqual(sc[b'max_dbs'], 4)
         self.assertEqual(sc[b'sync'], 1)
 
+    def test_incr_decr(self):
+        self.assertEqual(self.c.incr('i0'), 1)
+        self.assertEqual(self.c.incr('i0', 2), 3)
+        self.assertEqual(self.c.incr('i1', 2), 2)
+        self.assertEqual(self.c.incr('i1', 2.5), 4.5)
+        self.assertEqual(self.c.decr('i1', 3.5), 1.0)
+        self.assertEqual(self.c.decr('i0'), 2)
+        self.assertEqual(self.c.decr('i2'), -1)
+        self.assertEqual(self.c.get('i0'), 2)
+        self.assertEqual(self.c.get('i1'), 1.)
+        self.assertEqual(self.c.get('i2'), -1)
+        self.c.set('i2', -2)
+        self.assertEqual(self.c.decr('i2'), -3)
+        self.c.set('i1', 2.0)
+        self.assertEqual(self.c.incr('i1'), 3.)
+
     def test_decode_keys(self):
         c = Client(host=TEST_HOST, port=TEST_PORT, decode_keys=True)
         c.mset({'k1': 'v1', 'k2': {'x1': 'y1', 'x2': {'y2': 'z2'}}})

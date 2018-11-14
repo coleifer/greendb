@@ -198,10 +198,16 @@ using the lower-case command name as the method name**.
     <td>int</td>
   </tr>
   <tr>
-    <td>DELETE</td>
-    <td>delete a key and any associated value(s)</td>
-    <td>key to delete</td>
-    <td>int: number of keys removed (1 on success, 0 if key not found)</td>
+    <td>DECR</td>
+    <td>decrement the value at the given key</td>
+    <td>amount to decrement by (optional, default is 1)</td>
+    <td>int or float</td>
+  </tr>
+  <tr>
+    <td>INCR</td>
+    <td>increment the value at the given key</td>
+    <td>amount to increment by (optional, default is 1)</td>
+    <td>int or float</td>
   </tr>
   <tr>
     <td>DELETEDUP</td>

@@ -506,6 +506,8 @@ class Server(object):
 
             # K/V operations.
             ('COUNT', self.count),
+            ('DECR', self.decr),
+            ('INCR', self.incr),
             ('DELETE', self.delete),
             ('DELETEDUP', self.deletedup),
             ('DUPCOUNT', self.dupcount),
@@ -580,6 +582,29 @@ class Server(object):
         with client.ctx() as txn:
             stat = txn.stat()
         return stat['entries']
+
+    def decr(self, client, key, amount=1):
+        return self._incr(client, key, -amount)
+
+    def incr(self, client, key, amount=1):
+        return self._incr(client, key, amount)
+
+    def _incr(self, client, key, amount):
+        with client.cursor(True) as cursor:
+            # If the key does not exist, just set the desired value.
+            if not cursor.set_key(key):
+                cursor.put(key, mpackb(amount))
+                return amount
+
+            orig = munpackb(cursor.value())
+            try:
+                value = orig + amount
+            except TypeError:
+                raise CommandError('decr operation on wrong type of value')
+
+            cursor.delete()
+            cursor.put(key, mpackb(value))
+            return value
 
     def delete(self, client, key):
         with client.ctx(True) as txn:
@@ -936,6 +961,8 @@ class Client(object):
 
     # Basic k/v operations.
     count = command('COUNT')
+    decr = command('DECR')
+    incr = command('INCR')
     delete = command('DELETE')
     deletedup = command('DELETEDUP')
     dupcount = command('DUPCOUNT')
