@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+from __future__ import unicode_literals  # Required for 2.x compatability.
+
 import gevent
 from gevent import socket
 from gevent.pool import Pool
@@ -7,7 +9,8 @@ from gevent.server import StreamServer
 from gevent.thread import get_ident
 
 import lmdb
-import msgpack
+from msgpack import packb as msgpack_packb
+from msgpack import unpackb as msgpack_unpackb
 
 from collections import namedtuple
 from contextlib import contextmanager
@@ -47,6 +50,15 @@ def encode(s):
     else:
         return str(s).encode('utf-8')
 
+def encode_bulk_dict(d):
+    accum = {}
+    for key, value in d.items():
+        accum[encode(key)] = value
+    return accum
+
+def encode_bulk_list(l):
+    return [encode(k) for k in l]
+
 def decode(s):
     if isinstance(s, unicode):
         return s
@@ -55,11 +67,9 @@ def decode(s):
     else:
         return str(s)
 
-def decode_dict(d):
+def decode_bulk_dict(d):
     accum = {}
     for key, value in d.items():
-        if isinstance(value, dict):
-            value = decode_dict(value)
         accum[decode(key)] = value
     return accum
 
@@ -242,6 +252,8 @@ class ProtocolHandler(object):
         first_byte = sock._read(1)
         if first_byte == b'$':
             return self.handle_string(sock)
+        elif first_byte == b'^':
+            return self.handle_unicode(sock)
         elif first_byte == b':':
             return self.handle_integer(sock)
         elif first_byte == b'*':
@@ -277,9 +289,13 @@ class ProtocolHandler(object):
 
     def handle_string(self, sock):
         length = int(sock.readline())
-        if length == -1:
-            return None
-        return sock.read(length)
+        if length >= 0:
+            return sock.read(length)
+
+    def handle_unicode(self, sock):
+        length = int(sock.readline())
+        if length >= 0:
+            return sock.read(length).decode('utf-8')
 
     def handle_array(self, sock):
         num_elements = int(sock.readline())
@@ -298,10 +314,11 @@ class ProtocolHandler(object):
         sock.send(blocking)
 
     def _write(self, sock, data):
-        if isinstance(data, unicode):
-            data = encode(data)
         if isinstance(data, bytes):
             sock.write(b'$%d\r\n%s\r\n' % (len(data), data))
+        elif isinstance(data, unicode):
+            data = encode(data)
+            sock.write(b'^%d\r\n%s\r\n' % (len(data), data))
         elif data is True or data is False:
             sock.write(b':%d\r\n' % (1 if data else 0))
         elif isinstance(data, int_types):
@@ -438,6 +455,8 @@ class Connection(object):
         self.db = 0
 
     def use_db(self, idx):
+        if not isinstance(idx, int):
+            raise CommandError('database index must be an integer')
         if idx not in self.storage.databases:
             raise CommandError('unrecognized database: %s' % idx)
         self.db = idx
@@ -459,11 +478,11 @@ class Connection(object):
         self.sock.close()
 
 
-mpackb = msgpack.packb
-munpackb = msgpack.unpackb
+mpackb = lambda o: msgpack_packb(o, use_bin_type=True)
+munpackb = lambda b: msgpack_unpackb(b, raw=False)
 def mpackdict(d):
     for key, value in d.items():
-        yield (key, mpackb(value))
+        yield (encode(key), mpackb(value))
 
 
 def requires_dupsort(meth):
@@ -516,6 +535,7 @@ class Server(object):
             ('EXISTS', self.exists),
             ('GET', self.get),
             ('GETDUP', self.getdup),
+            ('LENGTH', self.length),
             ('POP', self.pop),
             ('REPLACE', self.replace),
             ('SET', self.set),
@@ -576,8 +596,8 @@ class Server(object):
     def sync(self, client):
         return self.storage.sync()
 
-    def use_db(self, client, name):
-        return client.use_db(name)
+    def use_db(self, client, idx):
+        return client.use_db(idx)
 
     # K/V operations.
     def count(self, client):
@@ -586,10 +606,10 @@ class Server(object):
         return stat['entries']
 
     def decr(self, client, key, amount=1):
-        return self._incr(client, key, -amount)
+        return self._incr(client, encode(key), -amount)
 
     def incr(self, client, key, amount=1):
-        return self._incr(client, key, amount)
+        return self._incr(client, encode(key), amount)
 
     def _incr(self, client, key, amount):
         with client.cursor(True) as cursor:
@@ -609,6 +629,7 @@ class Server(object):
             return value
 
     def cas(self, client, key, old_value, new_value):
+        key = encode(key)
         with client.ctx(True) as txn:
             value = txn.get(key)
             if value is not None and munpackb(value) == old_value:
@@ -624,32 +645,33 @@ class Server(object):
 
     def delete(self, client, key):
         with client.ctx(True) as txn:
-            return txn.delete(key)
+            return txn.delete(encode(key))
 
     @requires_dupsort
     def deletedup(self, client, key, value):
         with client.ctx(True) as txn:
-            return txn.delete(key, mpackb(value))
+            return txn.delete(encode(key), mpackb(value))
 
     @requires_dupsort
     def dupcount(self, client, key):
         with client.cursor() as cursor:
-            if not cursor.set_key(key):
+            if not cursor.set_key(encode(key)):
                 return
             return cursor.count()
 
     def exists(self, client, key):
         sentinel = object()
         with client.ctx() as txn:
-            return txn.get(key, sentinel) is not sentinel
+            return txn.get(encode(key), sentinel) is not sentinel
 
     def get(self, client, key):
         with client.ctx() as txn:
-            res = txn.get(key)
+            res = txn.get(encode(key))
             if res is not None:
                 return munpackb(res)
 
     def getdup(self, client, key):
+        key = encode(key)
         with client.cursor() as cursor:
             if not cursor.set_key(key):
                 return
@@ -660,36 +682,45 @@ class Server(object):
                     break
         return accum
 
+    def length(self, client, key):
+        value = self.get(client, key)
+        if value is not None:
+            try:
+                return len(value)
+            except TypeError:
+                raise CommandError('incompatible type for LENGTH command')
+
     def pop(self, client, key):
         with client.ctx(True) as txn:
-            res = txn.pop(key)
+            res = txn.pop(encode(key))
             if res is not None:
                 return munpackb(res)
 
     def replace(self, client, key, value):
         with client.ctx(True) as txn:
-            old_val = txn.replace(key, mpackb(value))
+            old_val = txn.replace(encode(key), mpackb(value))
             if old_val is not None:
                 return munpackb(old_val)
 
     def set(self, client, key, value):
         with client.ctx(True) as txn:
-            return txn.put(key, mpackb(value), dupdata=False, overwrite=True)
+            return txn.put(encode(key), mpackb(value), dupdata=False)
 
     @requires_dupsort
     def setdup(self, client, key, value):
         with client.ctx(True) as txn:
-            return txn.put(key, mpackb(value), dupdata=True, overwrite=True)
+            return txn.put(encode(key), mpackb(value))
 
     def setnx(self, client, key, value):
         with client.ctx(True) as txn:
-            return txn.put(key, mpackb(value), dupdata=False, overwrite=False)
+            return txn.put(encode(key), mpackb(value), dupdata=False,
+                           overwrite=False)
 
     # Bulk K/V operations.
     def mdelete(self, client, keys):
         n = 0
         with client.ctx(True) as txn:
-            for key in keys:
+            for key in map(encode, keys):
                 if txn.delete(key):
                     n += 1
         return n
@@ -697,7 +728,7 @@ class Server(object):
     def mget(self, client, keys):
         accum = {}
         with client.ctx() as txn:
-            for key in keys:
+            for key in map(encode, keys):
                 res = txn.get(key)
                 if res is not None:
                     accum[key] = munpackb(res)
@@ -706,7 +737,7 @@ class Server(object):
     def mgetdup(self, client, keys):
         accum = {}
         with client.cursor() as cursor:
-            for key in keys:
+            for key in map(encode, keys):
                 if cursor.set_key(key):
                     values = []
                     while cursor.key() == key:
@@ -719,7 +750,7 @@ class Server(object):
     def mpop(self, client, keys):
         accum = {}
         with client.cursor(True) as cursor:
-            for key in keys:
+            for key in map(encode, keys):
                 res = cursor.pop(key)
                 if res is not None:
                     accum[key] = munpackb(res)
@@ -729,6 +760,7 @@ class Server(object):
         accum = {}
         with client.cursor(True) as cursor:
             for key, value in data.items():
+                key = encode(key)
                 old_val = cursor.replace(key, mpackb(value))
                 if old_val is not None:
                     accum[key] = munpackb(old_val)
@@ -754,13 +786,14 @@ class Server(object):
     def deleterange(self, client, start=None, stop=None, count=None):
         if count is None:
             count = 0
+        stop = encode(stop) if stop is not None else stop
         n = 0
 
         with client.cursor(write=True) as cursor:
             if start is None:
                 if not cursor.first():
                     return n
-            elif not cursor.set_range(start):
+            elif not cursor.set_range(encode(start)):
                 return n
 
             while True:
@@ -782,12 +815,13 @@ class Server(object):
         accum = []
         if count is None:
             count = 0
+        stop = encode(stop) if stop is not None else stop
 
         with client.cursor() as cursor:
             if start is None:
                 if not cursor.first():
                     return []
-            elif not cursor.set_range(start):
+            elif not cursor.set_range(encode(start)):
                 return []
 
             while True:
@@ -991,7 +1025,7 @@ class Client(object):
         if isinstance(resp, Error):
             raise CommandError(decode(resp.message))
         if self._decode_keys and isinstance(resp, dict):
-            resp = decode_dict(resp)
+            resp = decode_bulk_dict(resp)
         return resp
 
     def execute(self, *args):
@@ -1025,6 +1059,7 @@ class Client(object):
     exists = command('EXISTS')
     get = command('GET')
     getdup = command('GETDUP')
+    length = command('LENGTH')
     pop = command('POP')
     replace = command('REPLACE')
     set = command('SET')
