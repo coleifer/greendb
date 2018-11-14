@@ -8,20 +8,17 @@ import time
 import gevent
 from greendb import Client
 
-
-
+client = Client()
 
 def get_sleep_set(k, v, n=1):
-    client = Client()
     client.set(k, v)
     #time.sleep(n)
     client._sleep(n)
     assert client.get(k) == v
-    client.close()
 
 
 n = 1
-t = 256
+t = 100
 start = time.time()
 
 greenlets = []
@@ -31,6 +28,6 @@ for i in range(t):
 for g in greenlets:
     g.join()
 
-Client().flush()
+client.flush()
 stop = time.time()
 print('done. slept=%s, took %.2f for %s threads.' % (n, stop - start, t))
