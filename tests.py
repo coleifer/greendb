@@ -27,7 +27,7 @@ def run_server():
     tmp_dir = tempfile.mkdtemp(suffix='greendb')
     data_dir = os.path.join(tmp_dir, 'data')
     server = Server(host=TEST_HOST, port=TEST_PORT, path=data_dir,
-                    max_dbs=4, dupsort=[3])
+                    max_dbs=4, dupsort=[3], sync=False)
     def run():
         try:
             server.run()
@@ -113,7 +113,7 @@ class TestBasicOperations(BaseTestCase):
         self.assertEqual(sc['dupsort'], [3])
         self.assertEqual(sc['lock'], 1)
         self.assertEqual(sc['max_dbs'], 4)
-        self.assertEqual(sc['sync'], 1)
+        self.assertEqual(sc['sync'], 0)
 
     def test_decode_keys(self):
         c = Client(host=TEST_HOST, port=TEST_PORT, decode_keys=True)
