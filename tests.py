@@ -109,22 +109,6 @@ class TestBasicOperations(BaseTestCase):
         self.assertEqual(sc[b'max_dbs'], 4)
         self.assertEqual(sc[b'sync'], 1)
 
-    def test_incr_decr(self):
-        self.assertEqual(self.c.incr('i0'), 1)
-        self.assertEqual(self.c.incr('i0', 2), 3)
-        self.assertEqual(self.c.incr('i1', 2), 2)
-        self.assertEqual(self.c.incr('i1', 2.5), 4.5)
-        self.assertEqual(self.c.decr('i1', 3.5), 1.0)
-        self.assertEqual(self.c.decr('i0'), 2)
-        self.assertEqual(self.c.decr('i2'), -1)
-        self.assertEqual(self.c.get('i0'), 2)
-        self.assertEqual(self.c.get('i1'), 1.)
-        self.assertEqual(self.c.get('i2'), -1)
-        self.c.set('i2', -2)
-        self.assertEqual(self.c.decr('i2'), -3)
-        self.c.set('i1', 2.0)
-        self.assertEqual(self.c.incr('i1'), 3.)
-
     def test_decode_keys(self):
         c = Client(host=TEST_HOST, port=TEST_PORT, decode_keys=True)
         c.mset({'k1': 'v1', 'k2': {'x1': 'y1', 'x2': {'y2': 'z2'}}})
@@ -186,6 +170,8 @@ class TestBasicOperations(BaseTestCase):
         self.assertEqual(self.c.get('key'), b'aaa')
         self.assertEqual(self.c.replace('key', 'bbb'), b'aaa')
         self.assertEqual(self.c.get('key'), b'bbb')
+        self.assertTrue(self.c.replace('keyz', 'xxx') is None)
+        self.assertEqual(self.c.replace('keyz', 'yyy'), b'xxx')
 
         self.assertEqual(self.c.setnx('key', 'ccc'), 0)
         self.assertEqual(self.c.setnx('key2', 'xxx'), 1)
@@ -261,6 +247,9 @@ class TestBasicOperations(BaseTestCase):
         self.assertEqual(self.c.get('key'), b'bbb')
         self.assertEqual(self.c.getdup('key'), [b'bbb'])
         self.assertEqual(self.c.dupcount('key'), 1)
+        self.assertTrue(self.c.replace('keyz', 'xxx') is None)
+        self.assertEqual(self.c.replace('keyz', 'yyy'), b'xxx')
+        self.assertEqual(self.c.getdup('keyz'), [b'yyy'])
 
         self.assertEqual(self.c.setnx('key', 'ccc'), 0)
         self.assertEqual(self.c.setnx('key2', 'xxx'), 1)
@@ -543,6 +532,71 @@ class TestBasicOperations(BaseTestCase):
             assertRange('z0', None, [], count)
             assertRange('a0', 'a99', [], count)
             assertRange('z0', 'z99', [], count)
+
+    def test_incr_decr(self):
+        self.assertEqual(self.c.incr('i0'), 1)
+        self.assertEqual(self.c.incr('i0', 2), 3)
+        self.assertEqual(self.c.incr('i1', 2), 2)
+        self.assertEqual(self.c.incr('i1', 2.5), 4.5)
+        self.assertEqual(self.c.decr('i1', 3.5), 1.0)
+        self.assertEqual(self.c.decr('i0'), 2)
+        self.assertEqual(self.c.decr('i2'), -1)
+        self.assertEqual(self.c.get('i0'), 2)
+        self.assertEqual(self.c.get('i1'), 1.)
+        self.assertEqual(self.c.get('i2'), -1)
+        self.c.set('i2', -2)
+        self.assertEqual(self.c.decr('i2'), -3)
+        self.c.set('i1', 2.0)
+        self.assertEqual(self.c.incr('i1'), 3.)
+
+    def test_cas(self):
+        self.c.set('k1', 'v1')
+        self.c.set('k2', 'v2')
+        self.assertTrue(self.c.cas('k1', 'v1', 'v1-x'))
+        self.assertFalse(self.c.cas('k1', 'v1', 'v1-y'))
+        self.assertEqual(self.c.get('k1'), b'v1-x')
+
+        self.assertFalse(self.c.cas('k2', 'v1-x', 'v1-z'))
+        self.assertEqual(self.c.get('k2'), b'v2')
+        self.assertTrue(self.c.cas('k2', 'v2', 'v2-x'))
+        self.assertTrue(self.c.cas('k2', 'v2-x', 'v2-y'))
+        self.assertFalse(self.c.cas('k2', 'v2', 'v2-z'))
+        self.assertEqual(self.c.get('k2'), b'v2-y')
+
+        self.assertFalse(self.c.cas('k3', '', 'v3'))
+        self.assertFalse(self.c.cas('k3', 'x3', 'y3'))
+        self.assertTrue(self.c.cas('k3', None, 'v3'))
+        self.assertEqual(self.c.get('k3'), b'v3')
+
+    def test_cas_dupsort(self):
+        self.c.use(3)
+
+        self.c.set('k1', 'v1-b')
+        self.c.set('k1', 'v1-a')
+        self.c.set('k1', 'v1-c')
+        self.c.set('k2', 'v2-a')
+
+        # v1-a is the first element, so that is what we compare.
+        self.assertFalse(self.c.cas('k1', 'v1-b', 'v1-x'))
+
+        # We will successfully match value, so v1-a is deleted and v1-y is
+        # added. The next compare will have to be against v1-b, however.
+        self.assertTrue(self.c.cas('k1', 'v1-a', 'v1-y'))
+        self.assertEqual(self.c.getdup('k1'), [b'v1-b', b'v1-c', b'v1-y'])
+        self.assertFalse(self.c.cas('k1', 'v1-y', 'v1-z'))
+        self.assertTrue(self.c.cas('k1', 'v1-b', 'v1-0'))
+        self.assertEqual(self.c.getdup('k1'), [b'v1-0', b'v1-c', b'v1-y'])
+
+        self.assertFalse(self.c.cas('k2', 'v1-0', 'v2-z'))
+        self.assertEqual(self.c.getdup('k2'), [b'v2-a'])
+        self.assertTrue(self.c.cas('k2', 'v2-a', 'v2-x'))
+        self.assertTrue(self.c.cas('k2', 'v2-x', 'v2-y'))
+        self.assertEqual(self.c.getdup('k2'), [b'v2-y'])
+
+        self.assertFalse(self.c.cas('k3', '', 'v3'))
+        self.assertFalse(self.c.cas('k3', 'x3', 'y3'))
+        self.assertTrue(self.c.cas('k3', None, 'v3'))
+        self.assertEqual(self.c.getdup('k3'), [b'v3'])
 
 
 if __name__ == '__main__':

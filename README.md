@@ -210,6 +210,18 @@ using the lower-case command name as the method name**.
     <td>int or float</td>
   </tr>
   <tr>
+    <td>CAS</td>
+    <td>compare-and-set</td>
+    <td>key, original value, new value</td>
+    <td>boolean indicating success or failure</td>
+  </tr>
+  <tr>
+    <td>DELETE</td>
+    <td>delete a key and any value(s) associated</td>
+    <td>key</td>
+    <td>int: number of keys removed (1 on success, 0 if key not found)</td>
+  </tr>
+  <tr>
     <td>DELETEDUP</td>
     <td>delete a particular key/value pair when dupsort is enabled</td>
     <td>key, value to delete</td>

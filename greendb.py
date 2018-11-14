@@ -508,6 +508,7 @@ class Server(object):
             ('COUNT', self.count),
             ('DECR', self.decr),
             ('INCR', self.incr),
+            ('CAS', self.cas),
             ('DELETE', self.delete),
             ('DELETEDUP', self.deletedup),
             ('DUPCOUNT', self.dupcount),
@@ -605,6 +606,20 @@ class Server(object):
             cursor.delete()
             cursor.put(key, mpackb(value))
             return value
+
+    def cas(self, client, key, old_value, new_value):
+        with client.ctx(True) as txn:
+            value = txn.get(key)
+            if value is not None and munpackb(value) == old_value:
+                if self.storage.supports_dupsort(client.db):
+                    txn.delete(key, value)
+                txn.put(key, mpackb(new_value))
+                return True
+            elif value is None and old_value is None:
+                txn.put(key, mpackb(new_value))
+                return True
+            else:
+                return False
 
     def delete(self, client, key):
         with client.ctx(True) as txn:
@@ -964,6 +979,7 @@ class Client(object):
     decr = command('DECR')
     incr = command('INCR')
     delete = command('DELETE')
+    cas = command('CAS')
     deletedup = command('DELETEDUP')
     dupcount = command('DUPCOUNT')
     exists = command('EXISTS')
