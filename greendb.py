@@ -1174,10 +1174,10 @@ def read_config(config_file):
             return json.loads(fh.read())
     return {}
 
-def print_config(conf):
+def log_config(conf):
     for key, value in sorted(conf.items()):
         if value is not None:
-            print('%s=%s' % (key, value))
+            logger.debug('%s=%s' % (key, value))
 
 
 if __name__ == '__main__':
@@ -1206,7 +1206,7 @@ if __name__ == '__main__':
     print(':   ,    , .\'')
     print('\'. (___.\'_/')
     print(' \x1b[33m((\x1b[32m-\x1b[33m((\x1b[32m-\'\'\x1b[0m')
-    print_config(config)
+    log_config(config)
     try:
         server.run()
     except KeyboardInterrupt:
