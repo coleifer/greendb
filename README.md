@@ -431,3 +431,46 @@ The protocol is based on the Redis protocol, and includes the addition of a
 dedicated dictionary type, denoted by a `%`, a floating-point type, denoted by
 a `~`, and a unicode text type denoted by `^`. For details, see [redis protocol documentation](https://redis.io/topics/protocol)
 or refer to the [greendb ProtocolHandler code](https://github.com/coleifer/greendb/blob/master/greendb.py).
+
+#### performance
+
+Here are some sample runs I generated using the `redis-benchmark` tool. Redis
+and greendb are both running with **default settings**.
+
+The purpose of these numbers is to illustrate the performance of greendb
+*relative to* redis. The benchmarks were run on a 6-year old laptop, so they
+probably aren't very helpful in *absolute* terms. As you will see, redis is
+roughly 6-8x faster in terms of requests per second.
+
+<table>
+  <thead>
+    <th>operation</th>
+    <th>concurrency</th>
+    <th>redis r/s</th>
+    <th>greendb r/s</th>
+  </thead>
+  <tr>
+    <th>SET</th>
+    <th>50</th>
+    <th>~72000</th>
+    <th>~8300</th>
+  </tr>
+  <tr>
+    <th>SET</th>
+    <th>1000</th>
+    <th>~45000</th>
+    <th>~7300</th>
+  </tr>
+  <tr>
+    <th>GET</th>
+    <th>50</th>
+    <th>~82000</th>
+    <th>~9800</th>
+  </tr>
+  <tr>
+    <th>GET</th>
+    <th>1000</th>
+    <th>~61000</th>
+    <th>~8500</th>
+  </tr>
+</table>
