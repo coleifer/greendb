@@ -187,6 +187,12 @@ using the lower-case command name as the method name**.
     <td>dict mapping database index to boolean</td>
   </tr>
   <tr>
+    <td>PING</td>
+    <td>ping the server</td>
+    <td>(none)</td>
+    <td>"pong"</td>
+  </tr>
+  <tr>
     <td>STAT</td>
     <td>metadata related to the currently-selected database b-tree</td>
     <td>(none)</td>

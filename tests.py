@@ -58,6 +58,9 @@ class TestBasicOperations(BaseTestCase):
         # By default we will use the 0th database.
         self.c.use(0)
 
+    def test_ping(self):
+        self.assertEqual(self.c.ping(), b'pong')
+
     def test_identity(self):
         test_data = (
             b'foo',

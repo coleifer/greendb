@@ -519,6 +519,7 @@ class Server(object):
             ('ENVSTAT', self.envstat),
             ('FLUSH', self.flush),
             ('FLUSHALL', self.flushall),
+            ('PING', self.ping),
             ('STAT', self.stat),
             ('SYNC', self.sync),
             ('USE', self.use_db),
@@ -587,6 +588,9 @@ class Server(object):
 
     def flushall(self, client):
         return self.storage.flushall()
+
+    def ping(self, client):
+        return b'pong'
 
     def stat(self, client):
         with client.ctx() as txn:
@@ -1043,6 +1047,7 @@ class Client(object):
     envstat = command('ENVSTAT')
     flush = command('FLUSH')
     flushall = command('FLUSHALL')
+    ping = command('PING')
     stat = command('STAT')
     sync = command('SYNC')
     use = command('USE')
