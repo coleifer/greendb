@@ -142,10 +142,10 @@ parameters) or for any other reason (e.g., attempting to write to a read-only
 database), then a `CommandError` will be raised by the client with a message
 indicating what caused the error.
 
-**A note about connections**: the greendb client will automatically connect to
-the server unless you instantiate it with `connect=False`. A new connection can
-be opened using the `connect()` method, and closed using `close()`. The client
-can be also used as a context manager.
+**A note about connections**: the greendb client will automatically connect the
+first time you issue a command to the server. The client maintains its own
+thread-safe (and greenlet-safe) connection pool. If you wish to explicitly
+connect, the client may be used as a context manager.
 
 In a multi-threaded or multi-greenlet application (e.g. a web app), the client
 will maintain a separate connection for each thread/greenlet.
