@@ -346,7 +346,7 @@ DEFAULT_MAP_SIZE = 1024 * 1024 * 256  # 256MB.
 
 class Storage(object):
     def __init__(self, path, map_size=DEFAULT_MAP_SIZE, read_only=False,
-                 metasync=True, sync=True, writemap=False, map_async=False,
+                 metasync=True, sync=False, writemap=False, map_async=False,
                  meminit=True, max_dbs=16, max_spare_txns=64, lock=True,
                  dupsort=False):
         self._path = path
@@ -1140,9 +1140,9 @@ def get_option_parser():
                       help='Port to listen on.', type=int)
     parser.add_option('-r', '--reset', action='store_true', dest='reset',
                       help='Reset database and config. All data will be lost.')
-    parser.add_option('-S', '--no-sync', action='store_true', dest='no_sync',
-                      help=('Do not flush system buffers to disk when '
-                            'committing a transaction. Use with caution.'))
+    parser.add_option('-s', '--sync', action='store_true', dest='sync',
+                      help=('Flush system buffers to disk when committing a '
+                            'transaction. Durable but much slower.'))
     parser.add_option('-M', '--no-metasync', action='store_true',
                       dest='no_metasync', help=(
                           'Flush system buffers to disk only once per '
@@ -1192,7 +1192,7 @@ if __name__ == '__main__':
     config.setdefault('port', options.port)
     config.setdefault('max_clients', options.max_clients)
     config.setdefault('path', options.data_dir)
-    config.setdefault('sync', not options.no_sync)
+    config.setdefault('sync', bool(options.sync))
     config.setdefault('metasync', not options.no_metasync)
     config.setdefault('writemap', options.writemap)
     config.setdefault('map_async', options.map_async)

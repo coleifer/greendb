@@ -27,7 +27,7 @@ def run_server():
     tmp_dir = tempfile.mkdtemp(suffix='greendb')
     data_dir = os.path.join(tmp_dir, 'data')
     server = Server(host=TEST_HOST, port=TEST_PORT, path=data_dir,
-                    max_dbs=4, dupsort=[3], sync=False)
+                    max_dbs=4, dupsort=[3])
     def run():
         try:
             server.run()

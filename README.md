@@ -69,8 +69,8 @@ Options:
                         Maximum number of clients.
   -p PORT, --port=PORT  Port to listen on.
   -r, --reset           Reset database and config. All data will be lost.
-  -S, --no-sync         Do not flush system buffers to disk when committing a
-                        transaction. Use with caution.
+  -s, --sync            Flush system buffers to disk when committing a
+                        transaction. Durable but much slower.
   -M, --no-metasync     Flush system buffers to disk only once per
                         transaction, omit the metadata flush.
   -W, --writemap        Use a writeable memory map.
@@ -90,7 +90,7 @@ Config file example with defaults -- remove comments before using:
   "map_size": 268435456,  // Default map size is 256MB. INCREASE THIS!
   "read_only": false,  // Open the database in read-only mode.
   "metasync": true,  // Sync metadata changes (recommended).
-  "sync": true,  // Sync all changes.
+  "sync": false,  // Sync all changes (durable, but much slower).
   "writemap": false,  // Use a writable map (probably safe to do).
   "map_async": false,  // Asynchronous writable map.
   "meminit": true,  // Initialize new memory pages to zero.
