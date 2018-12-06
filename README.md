@@ -250,6 +250,13 @@ using the lower-case command name as the method name**.
     <td>int: number of key+value removed (1 on success, 0 if key+value not found)</td>
   </tr>
   <tr>
+    <td>DELETEDUPRAW</td>
+    <td>delete a particular key/value pair when dupsort is enabled using an
+    unserialized bytestring as the value</td>
+    <td>key, value to delete</td>
+    <td>int: number of key+value removed (1 on success, 0 if key+value not found)</td>
+  </tr>
+  <tr>
     <td>DUPCOUNT</td>
     <td>get number of values stored at the given key (requires dupsort)</td>
     <td>key</td>
@@ -312,6 +319,14 @@ using the lower-case command name as the method name**.
     (requires dupsort). Unlike SET, if the exact key/value pair already exists,
     this command will return 1 indicating success.</td>
     <td>key, value</td>
+    <td>int: 1 on success</td>
+  </tr>
+  <tr>
+    <td>SETDUPRAW</td>
+    <td>store a key/value pair, treating duplicates as successful writes
+    (requires dupsort). Additionally, the value is not serialized, but is
+    stored as a raw bytestring.</td>
+    <td>key, value (bytes)</td>
     <td>int: 1 on success</td>
   </tr>
   <tr>
@@ -395,6 +410,13 @@ using the lower-case command name as the method name**.
     start/end-points</td>
     <td>start key (optional), end key (optional), count (optional)</td>
     <td>list of [key, value] lists</td>
+  </tr>
+  <tr>
+    <td>GETRANGEDUPRAW</td>
+    <td>retrieve a range of duplicate values stored in a given key, using
+    optional (inclusive) start/end-points</td>
+    <td>key, start value (optional), end value (optional), count (optional)</td>
+    <td>list of values (as bytestrings)</td>
   </tr>
   <tr>
     <td>KEYS</td>

@@ -531,6 +531,7 @@ class Server(object):
             ('CAS', self.cas),
             ('DELETE', self.delete),
             ('DELETEDUP', self.deletedup),
+            ('DELETEDUPRAW', self.deletedupraw),
             ('DUPCOUNT', self.dupcount),
             ('EXISTS', self.exists),
             ('GET', self.get),
@@ -540,6 +541,7 @@ class Server(object):
             ('REPLACE', self.replace),
             ('SET', self.set),
             ('SETDUP', self.setdup),
+            ('SETDUPRAW', self.setdupraw),
             ('SETNX', self.setnx),
 
             # Bulk K/V operations.
@@ -555,6 +557,7 @@ class Server(object):
             # Cursor operations.
             ('DELETERANGE', self.deleterange),
             ('GETRANGE', self.getrange),
+            ('GETRANGEDUPRAW', self.getrangedupraw),
             ('ITEMS', self.getrange),
             ('KEYS', self.keys),
             ('PREFIX', self.match_prefix),
@@ -656,6 +659,11 @@ class Server(object):
             return txn.delete(encode(key), mpackb(value))
 
     @requires_dupsort
+    def deletedupraw(self, client, key, value):
+        with client.ctx(True) as txn:
+            return txn.delete(encode(key), encode(value))
+
+    @requires_dupsort
     def dupcount(self, client, key):
         with client.cursor() as cursor:
             if not cursor.set_key(encode(key)):
@@ -713,6 +721,11 @@ class Server(object):
     def setdup(self, client, key, value):
         with client.ctx(True) as txn:
             return txn.put(encode(key), mpackb(value))
+
+    @requires_dupsort
+    def setdupraw(self, client, key, value):
+        with client.ctx(True) as txn:
+            return txn.put(encode(key), encode(value))
 
     def setnx(self, client, key, value):
         with client.ctx(True) as txn:
@@ -843,6 +856,31 @@ class Server(object):
             key, value = cursor.item()
             return key, (key, munpackb(value))
         return self._cursor_op(client, start, stop, count, cb)
+
+    @requires_dupsort
+    def getrangedupraw(self, client, key, start=None, stop=None, count=None):
+        accum = []
+        if count is None:
+            count = 0
+        stop = encode(stop) if stop is not None else stop
+
+        with client.cursor() as cursor:
+            if start is None:
+                if not cursor.set_range(encode(key)):
+                    return []
+            elif not cursor.set_range_dup(encode(key), encode(start)):
+                return []
+
+            while True:
+                value = cursor.value()
+                if stop is not None and value > stop:
+                    break
+                accum.append(decode(value))
+                count -= 1
+                if count == 0 or not cursor.next_dup():
+                    break
+
+        return accum
 
     def keys(self, client, start=None, stop=None, count=None):
         def cb(cursor):
@@ -1059,6 +1097,7 @@ class Client(object):
     cas = command('CAS')
     delete = command('DELETE')
     deletedup = command('DELETEDUP')
+    deletedupraw = command('DELETEDUPRAW')
     dupcount = command('DUPCOUNT')
     exists = command('EXISTS')
     get = command('GET')
@@ -1068,6 +1107,7 @@ class Client(object):
     replace = command('REPLACE')
     set = command('SET')
     setdup = command('SETDUP')
+    setdupraw = command('SETDUPRAW')
     setnx = command('SETNX')
 
     # Bulk k/v operations.
@@ -1083,6 +1123,7 @@ class Client(object):
     # Cursor operations.
     deleterange = command('DELETERANGE')
     getrange = command('GETRANGE')
+    getrangedupraw = command('GETRANGEDUPRAW')
     items = command('ITEMS')
     keys = command('KEYS')
     prefix = command('PREFIX')

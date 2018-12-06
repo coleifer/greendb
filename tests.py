@@ -622,6 +622,72 @@ class TestBasicOperations(BaseTestCase):
         self.assertEqual(self.c.length('k5'), 2)
         self.assertTrue(self.c.length('kx') is None)
 
+    def test_raw_operations_dupsort(self):
+        # We need to specify the DB that supports dupsort.
+        self.c.use(3)
+
+        data = (
+            # id, username, status
+            (1, 'huey', 1),
+            (2, 'zaizee', 1),
+            (3, 'mickey', 0),
+            (4, 'beanie', 1),
+            (5, 'gracie', 0),
+            (6, 'rocky', 0),
+            (7, 'rocky-2', 0),
+            (8, 'rocky-3', 0))
+        for pk, username, status in data:
+            self.c.setdupraw('u:username', '%s %s' % (username, pk))
+            self.c.setdupraw('u:status', '%s %s' % (status, pk))
+
+        # We'll use chr(32) " " for the lower-bound, and chr(126) "~" for the
+        # upper-bound.
+        def assertR(start, stop, expected):
+            res = self.c.getrangedupraw('u:username', start, stop)
+            self.assertEqual([int(r.rsplit(' ', 1)[1]) for r in res], expected)
+
+        # Verify inclusiveness of both boundaries in this scheme.
+        assertR('zaizee ', 'zaizee ', [])
+        assertR('zaizee ', 'zaizee 0', [])
+        assertR('zaizee ', 'zaizee 2', [2])
+        assertR('zaizee ', 'zaizee ~', [2])
+        assertR('zaizee 0', 'zaizee ~', [2])
+        assertR('zaizee 2', 'zaizee ~', [2])
+
+        # Test equality comparison.
+        assertR('zaizee ', 'zaizee ~', [2])
+
+        # Less-than, and less-than-or-equal.
+        assertR(None, 'rocky  ', [4, 5, 1, 3])
+        assertR(None, 'rocky ~', [4, 5, 1, 3, 6])
+
+        # Greater-than, and greater-than-or-equal.
+        assertR('rocky ~', None, [7, 8, 2])
+        assertR('rocky  ', None, [6, 7, 8, 2])
+
+        # Startswith (prefix search).
+        assertR('rocky', 'rocky~', [6, 7, 8])
+        assertR('b', 'b~', [4])
+
+        # Between inclusive, between exclusive.
+        assertR('huey  ', 'rocky ~', [1, 3, 6])
+        assertR('huey ~', 'rocky  ', [3])
+
+        # Delete a few items and verify deletedupraw works.
+        self.c.deletedupraw('u:username', 'huey 1')
+        self.c.deletedupraw('u:username', 'rocky-2 7')
+        self.c.deletedupraw('u:username', 'rocky-3 x')  # Does not match!
+        assertR('gracie', 'zaizee  ', [5, 3, 6, 8])
+
+        # Status test.
+        def assertS(start, stop, expected):
+            res = self.c.getrangedupraw('u:status', start, stop)
+            self.assertEqual([int(r.rsplit(' ', 1)[1]) for r in res], expected)
+
+        assertS('0 ', '0 ~', [3, 5, 6, 7, 8])
+        assertS('1 ', '1 ~', [1, 2, 4])
+        assertS('0 ', '1 ~', [3, 5, 6, 7, 8, 1, 2, 4])
+
 
 if __name__ == '__main__':
     server_t, server, tmp_dir = run_server()
