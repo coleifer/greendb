@@ -65,12 +65,18 @@ Options:
   -H HOST, --host=HOST  Host to listen on.
   -l LOG_FILE, --log-file=LOG_FILE
                         Log file.
-  -m MAX_CLIENTS, --max-clients=MAX_CLIENTS
+  -m MAP_SIZE, --map-size=MAP_SIZE
+                        Maximum size of memory-map used for database. The
+                        default value is 256M and should be increased. Accepts
+                        value in bytes or file-size using "M" or "G" suffix.
+  --max-clients=MAX_CLIENTS
                         Maximum number of clients.
   -p PORT, --port=PORT  Port to listen on.
   -r, --reset           Reset database and config. All data will be lost.
   -s, --sync            Flush system buffers to disk when committing a
                         transaction. Durable but much slower.
+  -u DUPSORT, --dupsort=DUPSORT
+                        db index(es) to support dupsort
   -M, --no-metasync     Flush system buffers to disk only once per
                         transaction, omit the metadata flush.
   -W, --writemap        Use a writeable memory map.
@@ -87,7 +93,7 @@ Config file example with defaults -- remove comments before using:
   "port": 31337,
   "max_clients": 1024,
   "path": "data",  // Directory for data storage, default is "data" in CWD.
-  "map_size": 268435456,  // Default map size is 256MB. INCREASE THIS!
+  "map_size": "256M",  // Default map size is 256MB. INCREASE THIS!
   "read_only": false,  // Open the database in read-only mode.
   "metasync": true,  // Sync metadata changes (recommended).
   "sync": false,  // Sync all changes (durable, but much slower).
@@ -104,15 +110,21 @@ Config file example with defaults -- remove comments before using:
 Example custom configuration:
 
 * 1GB max database size
-* dupsort enabled on databases 10 - 15
+* dupsort enabled on databases 13, 14 and 15
 * data stored in /var/lib/greendb/data
 
 ```javascript
 {
-  "map_size": 1048576000,
-  "dupsort": [10, 11, 12, 13, 14, 15],
+  "map_size": "1G",
+  "dupsort": [13, 14, 15],
   "path": "/var/lib/greendb/data/"
 }
+```
+
+Equivalent configuration using command-line arguments:
+
+```
+$ greendb.py -m 1G -u 13 -u 14 -u 15 -D /var/lib/greendb/data/
 ```
 
 ### client

@@ -1180,7 +1180,11 @@ def get_option_parser():
     parser.add_option('-H', '--host', default='127.0.0.1', dest='host',
                       help='Host to listen on.')
     parser.add_option('-l', '--log-file', dest='log_file', help='Log file.')
-    parser.add_option('-m', '--max-clients', default=1024, dest='max_clients',
+    parser.add_option('-m', '--map-size', dest='map_size', help=(
+        'Maximum size of memory-map used for database. The default value is '
+        '256M and should be increased. Accepts value in bytes or file-size '
+        'using "M" or "G" suffix.'))
+    parser.add_option('--max-clients', default=1024, dest='max_clients',
                       help='Maximum number of clients.', type=int)
     parser.add_option('-p', '--port', default=31337, dest='port',
                       help='Port to listen on.', type=int)
@@ -1189,6 +1193,8 @@ def get_option_parser():
     parser.add_option('-s', '--sync', action='store_true', dest='sync',
                       help=('Flush system buffers to disk when committing a '
                             'transaction. Durable but much slower.'))
+    parser.add_option('-u', '--dupsort', action='append', dest='dupsort',
+                      help='db index(es) to support dupsort', type='int'),
     parser.add_option('-M', '--no-metasync', action='store_true',
                       dest='no_metasync', help=(
                           'Flush system buffers to disk only once per '
@@ -1215,15 +1221,40 @@ def configure_logger(options):
 
 
 def read_config(config_file):
-    if os.path.exists(config_file):
-        with open(config_file) as fh:
-            return json.loads(fh.read())
-    return {}
+    if not os.path.exists(config_file): return {}
+
+    with open(config_file) as fh:
+        config = json.loads(fh.read())
+
+    if config.get('map_size'):
+        config['map_size'] = parse_map_size(config['map_size'])
+    return config
 
 def log_config(conf):
     for key, value in sorted(conf.items()):
         if value is not None:
             logger.debug('%s=%s' % (key, value))
+
+def parse_map_size(value):
+    mapsize = value.lower() if value else '256m'
+
+    if mapsize.endswith('b'):
+        mapsize = mapsize[:-1]  # Strip "b", as in "mb", "gb", etc.
+    n = 1
+    if mapsize.endswith('k'):
+        exp = 1024
+    elif mapsize.endswith('m'):
+        exp = 1024 * 1024
+    elif mapsize.endswith('g'):
+        exp = 1024 * 1024 * 1024
+    else:
+        exp = 1
+        n = 0
+    mapsize = mapsize[:-n] if n else mapsize  # Strip trailing letter.
+    if not mapsize.isdigit():
+        raise ValueError('cannot parse file-size "%s", use a valid file-'
+                         'size like "256m" or "1g"' % value)
+    return int(mapsize) * exp
 
 
 if __name__ == '__main__':
@@ -1234,11 +1265,13 @@ if __name__ == '__main__':
         shutil.rmtree(options.data_dir)
 
     config = read_config(options.config or 'config.json')
-    config.setdefault('host', options.host)
-    config.setdefault('port', options.port)
-    config.setdefault('max_clients', options.max_clients)
     config.setdefault('path', options.data_dir)
+    config.setdefault('host', options.host)
+    config.setdefault('max_clients', options.max_clients)
+    config.setdefault('map_size', parse_map_size(options.map_size))
+    config.setdefault('port', options.port)
     config.setdefault('sync', bool(options.sync))
+    config.setdefault('dupsort', options.dupsort)
     config.setdefault('metasync', not options.no_metasync)
     config.setdefault('writemap', options.writemap)
     config.setdefault('map_async', options.map_async)
