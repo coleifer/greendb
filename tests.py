@@ -688,6 +688,27 @@ class TestBasicOperations(BaseTestCase):
         assertS('1 ', '1 ~', [1, 2, 4])
         assertS('0 ', '1 ~', [3, 5, 6, 7, 8, 1, 2, 4])
 
+    def test_processing_instruction_use_db(self):
+        # Verify we can specify the database for a one-off operation.
+        for i in range(4):
+            self.c.set('k1', 'v1-%s' % i, db=i)
+        for i in range(4):
+            self.assertEqual(self.c.get('k1', db=i), 'v1-%s' % i)
+
+        # The default db is 0.
+        self.assertEqual(self.c.get('k1'), 'v1-0')
+
+        # We can explicitly switch the db.
+        self.assertEqual(self.c.use(2), 2)
+        self.assertEqual(self.c.get('k1'), 'v1-2')
+
+        # We can specify the db for a one-off command.
+        for i in range(4):
+            self.assertEqual(self.c.get('k1', db=i), 'v1-%s' % i)
+
+        # The value from our call to "use()" is preserved.
+        self.assertEqual(self.c.get('k1'), 'v1-2')
+
 
 if __name__ == '__main__':
     server_t, server, tmp_dir = run_server()

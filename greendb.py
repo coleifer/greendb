@@ -4,6 +4,7 @@ from __future__ import unicode_literals  # Required for 2.x compatability.
 
 import gevent
 from gevent import socket
+from gevent.local import local as greenlet_local
 from gevent.pool import Pool
 from gevent.server import StreamServer
 from gevent.thread import get_ident
@@ -24,6 +25,7 @@ import logging
 import operator
 import optparse
 import os
+import re
 import shutil
 import sys
 import struct
@@ -91,6 +93,10 @@ class CommandError(Exception):
 
 
 Error = namedtuple('Error', ('message',))
+ProcessingInstruction = namedtuple('ProcessingInstruction', ('op', 'value'))
+
+PI_USE_DB = b'\x01'
+PROCESSING_INSTRUCTIONS = set((PI_USE_DB,))
 
 CRLF = b'\r\n'
 READSIZE = 4 * 1024
@@ -255,6 +261,8 @@ class ProtocolHandler(object):
             return self.handle_unicode(sock)
         elif first_byte == b':':
             return self.handle_integer(sock)
+        elif first_byte == b'.':
+            return self.handle_processing_instruction(sock)
         elif first_byte == b'*':
             return self.handle_array(sock)
         elif first_byte == b'%':
@@ -285,6 +293,13 @@ class ProtocolHandler(object):
     def handle_float(self, sock):
         val, = struct.unpack('>d', sock.read(8))
         return val
+
+    def handle_processing_instruction(self, sock):
+        instruction = sock.read(1)
+        if instruction not in PROCESSING_INSTRUCTIONS:
+            raise ValueError('unrecognized processing instruction, refusing to'
+                             ' process.')
+        return ProcessingInstruction(instruction, self.handle(sock))
 
     def handle_string(self, sock):
         length = int(sock.readline())
@@ -326,6 +341,9 @@ class ProtocolHandler(object):
             sock.write(b'$-1\r\n')
         elif isinstance(data, Error):
             sock.write(b'-%s\r\n' % encode(data.message))
+        elif isinstance(data, ProcessingInstruction):
+            sock.write(b'.%s\r\n' % encode(data.op))
+            self._write(sock, data.value)
         elif isinstance(data, (list, tuple)):
             sock.write(b'*%d\r\n' % len(data))
             for item in data:
@@ -394,6 +412,7 @@ class Storage(object):
         if not self.is_open:
             return False
 
+        self.sync(True)  # Always sync before closing.
         self.env.close()
         return True
 
@@ -938,6 +957,12 @@ class Server(object):
     def request_response(self, client):
         data = self._protocol.handle(client.sock)
 
+        # If we received a processing instruction, it will be handled here, as
+        # the next request will contain the relevant data.
+        if isinstance(data, ProcessingInstruction):
+            self.execute_processing_instruction(client, data)
+            return
+
         try:
             resp = self.respond(client, data)
         except Shutdown:
@@ -954,6 +979,15 @@ class Server(object):
             resp = Error('Unhandled server error: "%s"' % str(exc))
 
         self._protocol.write_response(client.sock, resp)
+
+    def execute_processing_instruction(self, client, pi):
+        if pi.op == PI_USE_DB and client.db != pi.value:
+            orig_db = client.db
+            try:
+                client.use_db(pi.value)
+                self.request_response(client)
+            finally:
+                client.use_db(orig_db)
 
     def respond(self, client, data):
         if not isinstance(data, (list, tuple)):
@@ -974,110 +1008,82 @@ class Server(object):
         return self._commands[command](client, *data[1:])
 
 
-class SocketPool(object):
-    def __init__(self, host, port, max_age=60):
-        self.host = host
-        self.port = port
-        self.max_age = max_age
-        self.free = []
-        self.in_use = {}
+class _ConnectionState(object):
+    def __init__(self, **kwargs):
+        super(_ConnectionState, self).__init__(**kwargs)
+        self.reset()
+    def reset(self): self.conn = None
+    def set_connection(self, conn): self.conn = conn
 
-    def checkout(self):
-        now = time.time()
-        tid = get_ident()
-        if tid in self.in_use:
-            sock = self.in_use[tid]
-            if sock.is_closed:
-                del self.in_use[tid]
-            else:
-                return sock
-
-        while self.free:
-            ts, sock = heapq.heappop(self.free)
-            if ts < now - self.max_age:
-                try:
-                    sock.close()
-                except OSError:
-                    pass
-            else:
-                self.in_use[tid] = sock
-                return sock
-
-        sock = self.in_use[tid] = self.create_socket()
-        return sock
-
-    def create_socket(self):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        sock.connect((self.host, self.port))
-        return _Socket(sock)
-
-    def checkin(self):
-        tid = get_ident()
-        if tid in self.in_use:
-            sock = self.in_use.pop(tid)
-            if not sock.is_closed:
-                heapq.heappush(self.free, (time.time(), sock))
-            return True
-        return False
-
-    def __enter__(self):
-        return self.checkout()
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.checkin()
-
-    def close(self):
-        tid = get_ident()
-        sock = self.in_use.pop(tid, None)
-        if sock:
-            try:
-                sock.close()
-            except OSError:
-                pass
-            return True
-        return False
+class _ConnectionLocal(_ConnectionState, greenlet_local): pass
 
 
 class Client(object):
     def __init__(self, host='127.0.0.1', port=31337, decode_keys=False,
-                 pool_max_age=60):
+                 timeout=60):
         self.host = host
         self.port = port
         self._decode_keys = decode_keys
+        self._timeout = timeout
         self._protocol = ProtocolHandler()
-        self._socket_pool = SocketPool(host, port, pool_max_age)
+        self._state = _ConnectionLocal()
+
+    def is_closed(self):
+        return self._state.conn is None
 
     def close(self):
-        return self._socket_pool.close()
+        if self._state.conn is None: return False
+        self._state.conn.close()
+        self._state.reset()
+        return True
+
+    def connect(self):
+        if self._state.conn is not None: return False
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        sock.settimeout(self._timeout)
+        sock.connect((self.host, self.port))
+        self._state.conn = _Socket(sock)
+        return True
 
     def read_response(self, conn, close_conn=False):
         try:
             resp = self._protocol.handle(conn)
         except EOFError:
-            conn.close()
+            self.close()
             raise ConnectionError('server went away')
         except Exception:
-            conn.close()
+            self.close()
             raise ServerInternalError('internal server error')
         else:
             if close_conn:
-                conn.close()
+                self.close()
         if isinstance(resp, Error):
             raise CommandError(decode(resp.message))
         if self._decode_keys and isinstance(resp, dict):
             resp = decode_bulk_dict(resp)
         return resp
 
-    def execute(self, *args):
-        with self._socket_pool as conn:
-            close_conn = args[0] in (b'QUIT', b'SHUTDOWN')
-            self._protocol.write_response(conn, args)
-            return self.read_response(conn, close_conn)
+    def execute(self, cmd, args, close_conn=False, db=None):
+        if self._state.conn is None:
+            self.connect()
 
-    def command(cmd):
-        def method(self, *args):
-            return self.execute(encode(cmd), *args)
+        conn = self._state.conn
+
+        # If the db is explicitly specified for a one-off command, then
+        # handle this using a processing instruction.
+        if db is not None:
+            pi = ProcessingInstruction(PI_USE_DB, db)
+            self._protocol._write(conn, pi)
+
+        # Execute the command. The command and its arguments (if it has any)
+        # are all packed into a tuple and written to the server as a list.
+        self._protocol.write_response(conn, (cmd,) + args)
+        return self.read_response(conn, close_conn)
+
+    def command(cmd, close_conn=False):
+        def method(self, *args, **kwargs):
+            return self.execute(encode(cmd), args, close_conn, **kwargs)
         return method
 
     # Database/schema management.
@@ -1131,8 +1137,8 @@ class Client(object):
 
     # Client operations.
     _sleep = command('SLEEP')
-    quit = command('QUIT')
-    shutdown = command('SHUTDOWN')
+    quit = command('QUIT', close_conn=True)
+    shutdown = command('SHUTDOWN', close_conn=True)
 
     def __setitem__(self, key, value):
         self.set(key, value)
@@ -1186,6 +1192,9 @@ def get_option_parser():
         'using "M" or "G" suffix.'))
     parser.add_option('--max-clients', default=1024, dest='max_clients',
                       help='Maximum number of clients.', type=int)
+    parser.add_option('-n', '--max-dbs', default=16, dest='max_dbs',
+                      help='Number of databases in environment. Default=16.',
+                      type='int')
     parser.add_option('-p', '--port', default=31337, dest='port',
                       help='Port to listen on.', type=int)
     parser.add_option('-r', '--reset', action='store_true', dest='reset',
@@ -1224,7 +1233,10 @@ def read_config(config_file):
     if not os.path.exists(config_file): return {}
 
     with open(config_file) as fh:
-        config = json.loads(fh.read())
+        data = fh.read()
+
+    # Strip comments.
+    config = json.loads(re.sub('\s*\/\/.*', '', data))
 
     if config.get('map_size'):
         config['map_size'] = parse_map_size(config['map_size'])
@@ -1267,8 +1279,9 @@ if __name__ == '__main__':
     config = read_config(options.config or 'config.json')
     config.setdefault('path', options.data_dir)
     config.setdefault('host', options.host)
-    config.setdefault('max_clients', options.max_clients)
     config.setdefault('map_size', parse_map_size(options.map_size))
+    config.setdefault('max_clients', options.max_clients)
+    config.setdefault('max_dbs', options.max_dbs)
     config.setdefault('port', options.port)
     config.setdefault('sync', bool(options.sync))
     config.setdefault('dupsort', options.dupsort)

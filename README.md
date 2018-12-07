@@ -71,6 +71,8 @@ Options:
                         value in bytes or file-size using "M" or "G" suffix.
   --max-clients=MAX_CLIENTS
                         Maximum number of clients.
+  -n MAX_DBS, --max-dbs=MAX_DBS
+                        Number of databases in environment. Default=16.
   -p PORT, --port=PORT  Port to listen on.
   -r, --reset           Reset database and config. All data will be lost.
   -s, --sync            Flush system buffers to disk when committing a
@@ -84,7 +86,7 @@ Options:
                         flushes to disk.
 ```
 
-Config file example with defaults -- remove comments before using:
+Complete config file example with default values:
 
 ```javascript
 
