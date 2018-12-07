@@ -82,6 +82,48 @@ class Field(Node):
     def python_value(self, value):
         return value
 
+class IntegerField(Field):
+    def python_value(self, value):
+        return int(value)
+
+class LongField(Field):
+    def db_value(self, value):
+        return struct.pack('>Q', value)
+
+    def python_value(self, value):
+        return struct.unpack('>Q', value)[0]
+
+class DateTimeField(Field):
+    def db_value(self, value):
+        return value.strftime('%Y-%m-%d %H:%M:%S.%f')
+
+    def python_value(self, value):
+        return datetime.datetime.strptime(value, '%Y-%m-%d %H:%M:%S.%f')
+
+class DateField(Field):
+    def db_value(self, value):
+        return value.strftime('%Y-%m-%d')
+
+    def python_value(self, value):
+        return datetime.datetime.strptime(value, '%Y-%m-%d').date()
+
+class TimestampField(Field):
+    def __init__(self, index=False, default=datetime.datetime.now):
+        super(TimestampField, self).__init__(index=index, default=default)
+
+    def db_value(self, value):
+        timestamp = time.mktime(value.timetuple())
+        timestamp += value.microsecond * .000001
+        timestamp = int(timestamp * 1e7)
+        return struct.pack('>Q', timestamp)
+
+    def python_value(self, value):
+        raw_ts, = struct.unpack('>Q', value)
+        timestamp, micro = divmod(raw_ts, 1e7)
+        return (datetime.datetime
+                .fromtimestamp(timestamp)
+                .replace(microsecond=int(micro)))
+
 
 class FieldDescriptor(object):
     def __init__(self, field):
@@ -118,9 +160,9 @@ class DeclarativeMeta(type):
 
             if client is None and base._meta.client is not None:
                 client = base._meta.client
-            if db is None and base._meta.db is not None:
+            if db is None:
                 db = base._meta.db
-            if index_db is None and base._meta.index_db is not None:
+            if index_db is None:
                 index_db = base._meta.index_db
 
         # Apply defaults if no value was found.
@@ -144,7 +186,7 @@ class DeclarativeMeta(type):
 
         # Always have an `id` field.
         if 'id' not in fields:
-            fields['id'] = Field()
+            fields['id'] = IntegerField()
 
         attrs['_meta'] = Metadata(name, client, db, index_db, fields)
         model = super(DeclarativeMeta, cls).__new__(cls, name, bases, attrs)
@@ -159,26 +201,12 @@ class DeclarativeMeta(type):
         return model
 
 
-class IndexClient(object):
-    def __init__(self, client, db, index_db):
-        self.client = client
-        self.db = db
-        self.index_db = index_db
-
-    def __enter__(self):
-        self.client.use(self.index_db)
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.client.use(self.db)
-
-
 class Metadata(object):
     def __init__(self, model_name, client, db, index_db, fields):
         self.model_name = model_name
         self.client = client
         self.db = db
         self.index_db = index_db
-        self.index_client = IndexClient(client, db, index_db)
         self.fields = fields
 
         self.name = model_name.lower()
@@ -200,7 +228,8 @@ class Metadata(object):
             if field.index:
                 self.indexed_fields.add(field.name)
                 self.indexed_field_objects.append(field)
-                self.indexes[field.name] = Index(self.client, field)
+                self.indexes[field.name] = Index(self.client, self.index_db,
+                                                 field)
 
         for field in self.sorted_fields:
             if callable(field.default):
@@ -246,8 +275,7 @@ class Model(with_metaclass(DeclarativeMeta)):
         self._save_model_data()
 
         # Update any secondary indexes.
-        with self._meta.index_client:
-            self._update_indexes(original_data)
+        self._update_indexes(original_data)
 
     def _save_model_data(self):
         # Generate the next ID in sequence if no ID is set.
@@ -286,9 +314,8 @@ class Model(with_metaclass(DeclarativeMeta)):
         key = self._meta.get_instance_key(self.id)
         self._meta.client.delete(key)
 
-        with self._meta.index_client:
-            for field, index in self._meta.indexes.items():
-                index.delete(getattr(self, field), self.id)
+        for field, index in self._meta.indexes.items():
+            index.delete(getattr(self, field), self.id)
 
     @classmethod
     def get(cls, expr):
@@ -325,38 +352,47 @@ class Model(with_metaclass(DeclarativeMeta)):
             else:
                 raise ValueError('Unable to execute query, unexpected type.')
 
-        with cls._meta.index_client:
-            id_list = dfs(expr)
-
+        id_list = dfs(expr)
         return [cls.load(primary_key) for primary_key in id_list]
 
 
+def _b(s):
+    if isinstance(s, bytes):
+        return s
+    elif isinstance(s, str):
+        return s.encode('utf8')
+    return str(s).encode('utf8')
+
+
 class Index(object):
-    def __init__(self, client, field):
+    def __init__(self, client, index_db, field):
         self.client = client
+        self.db = index_db
         self.field = field
-        self.key = 'idx:%s:%s' % (field.model._meta.name, field.name)
+        self.key = _b('idx:%s:%s' % (field.model._meta.name, field.name))
         self.stop_key = self.key + b'\xff'
         self.encode_pk = field.model.id.db_value
         self.decode_pk = field.model.id.python_value
 
     def get_value(self, value, primary_key):
-        return '%s\x00%s' % (
-            self.field.db_value(value) or '',
-            self.encode_pk(primary_key))
+        return b'%s\x00%s' % (
+            _b(self.field.db_value(value) or ''),
+            _b(self.encode_pk(primary_key)))
 
     def store(self, value, primary_key):
-        self.client.setdupraw(self.key, self.get_value(value, primary_key))
+        value = self.get_value(value, primary_key)
+        return self.client.setdupraw(self.key, value, db=self.db)
 
     def delete(self, value, primary_key):
-        self.client.deletedupraw(self.key, self.get_value(value, primary_key))
+        value = self.get_value(value, primary_key)
+        return self.client.deletedupraw(self.key, value, db=self.db)
 
     def _range_query(self, start=None, stop=None):
-        return self.client.getrangedupraw(self.key, start, stop)
+        return self.client.getrangedupraw(self.key, start, stop, db=self.db)
 
     def get_range_values(self, start=None, stop=None):
         accum = []
-        for raw_value in self.client.getrangedupraw(self.key, start, stop):
+        for raw_value in self._range_query(start, stop):
             delim_idx = raw_value.rfind(b'\x00')
             accum.append(self.decode_pk(raw_value[delim_idx + 1:]))
         return accum
@@ -364,19 +400,24 @@ class Index(object):
     def query(self, value, operation):
         if operation == '=':
             # Equality means range from value + delim, to value and any pk.
-            start = value + '\x00'
-            stop = value + '\x00\xff'
+            bval = _b(value)
+            start = bval + b'\x00'
+            stop = bval + b'\x00\xff'
             return self.get_range_values(start, stop)
         elif operation in ('<', '<='):
-            stop = value + ('\x00\x00' if operation == '<' else '\x00\xff')
+            bval = _b(value)
+            stop = bval + (b'\x00\x00' if operation == '<' else b'\x00\xff')
             return self.get_range_values(None, stop)
         elif operation in ('>', '>='):
-            start = value + ('\x00\xff' if operation == '>' else '\x00\x00')
+            bval = _b(value)
+            start = bval + (b'\x00\xff' if operation == '>' else b'\x00\x00')
             return self.get_range_values(start)
         elif operation == 'between':
-            start, stop, start_incl, stop_incl = value
-            start = start + ('\x00\x00' if start_incl else '\x00\xff')
-            stop = stop + ('\x00\xff' if stop_incl else '\x00\x00')
+            sstart, sstop, start_incl, stop_incl = value
+            start = _b(sstart)
+            stop = _b(sstop)
+            start = start + (b'\x00\x00' if start_incl else b'\x00\xff')
+            stop = stop + (b'\x00\xff' if stop_incl else b'\x00\x00')
             return self.get_range_values(start, stop)
         elif operation == '!=':
             for raw_value in self._range_query():
@@ -385,7 +426,8 @@ class Index(object):
                     accum.append(self.decode_pk(pk))
             return accum
         elif operation == 'startswith':
-            return self.get_range_values(value, value + '\xff')
+            bval = _b(value)
+            return self.get_range_values(bval, bval + b'\xff')
         else:
             raise ValueError('unrecognized operation: "%s"' % operation)
 
@@ -433,6 +475,5 @@ if __name__ == '__main__':
 
     print('\nKeys')
     print(client.keys())
-    with User._meta.index_client:
-        print(client.keys())
+    print(client.keys(db=15))
     client.flushall()
