@@ -1,5 +1,6 @@
 import datetime
 import struct
+import time
 
 from greendb import Client
 
@@ -286,6 +287,10 @@ class Model(with_metaclass(DeclarativeMeta)):
         key = self._meta.get_instance_key(self.id)
 
         # Store all model data serialized in a single record.
+        #accum = {}
+        #for field in self._meta.sorted_fields:
+        #    accum[field.name] = field.db_value(self._data.get(field.name))
+        #self._meta.client.set(key, accum)
         self._meta.client.set(key, self._data)
 
     def _update_indexes(self, original_data):
@@ -374,6 +379,9 @@ class Index(object):
         self.encode_pk = field.model.id.db_value
         self.decode_pk = field.model.id.python_value
 
+    def convert(self, value):
+        return _b(self.field.db_value(value))
+
     def get_value(self, value, primary_key):
         return b'%s\x00%s' % (
             _b(self.field.db_value(value) or ''),
@@ -400,33 +408,34 @@ class Index(object):
     def query(self, value, operation):
         if operation == '=':
             # Equality means range from value + delim, to value and any pk.
-            bval = _b(value)
+            bval = self.convert(value)
             start = bval + b'\x00'
             stop = bval + b'\x00\xff'
             return self.get_range_values(start, stop)
         elif operation in ('<', '<='):
-            bval = _b(value)
+            bval = self.convert(value)
             stop = bval + (b'\x00\x00' if operation == '<' else b'\x00\xff')
             return self.get_range_values(None, stop)
         elif operation in ('>', '>='):
-            bval = _b(value)
+            bval = self.convert(value)
             start = bval + (b'\x00\xff' if operation == '>' else b'\x00\x00')
             return self.get_range_values(start)
         elif operation == 'between':
             sstart, sstop, start_incl, stop_incl = value
-            start = _b(sstart)
-            stop = _b(sstop)
+            start = self.convert(sstart)
+            stop = self.convert(sstop)
             start = start + (b'\x00\x00' if start_incl else b'\x00\xff')
             stop = stop + (b'\x00\xff' if stop_incl else b'\x00\x00')
             return self.get_range_values(start, stop)
         elif operation == '!=':
+            bval = self.convert(value)
             for raw_value in self._range_query():
-                idx_value, pk = raw_value.rsplit(':', 1)
-                if value != idx_value:
+                idx_value, pk = raw_value.rsplit(b'\x00', 1)
+                if bval != idx_value:
                     accum.append(self.decode_pk(pk))
             return accum
         elif operation == 'startswith':
-            bval = _b(value)
+            bval = self.convert(value)
             return self.get_range_values(bval, bval + b'\xff')
         else:
             raise ValueError('unrecognized operation: "%s"' % operation)
@@ -476,4 +485,28 @@ if __name__ == '__main__':
     print('\nKeys')
     print(client.keys())
     print(client.keys(db=15))
+    client.flushall()
+
+    class Event(Model):
+        key = Field(index=True)
+        timestamp = TimestampField(index=True)
+        counter = LongField(index=True)
+        class Meta:
+            client = client
+
+    for i in range(1, 20):
+        ts = datetime.datetime(2018, 1, i, i, 0, 0)
+        Event.create(key='e%s' % i, timestamp=ts, counter=i)
+
+    print('\nAll events')
+    for event in Event.all():
+        print(event.key, event.timestamp, event.counter)
+
+    query = Event.query(Event.timestamp.between(
+        datetime.datetime(2018, 1, 6),
+        datetime.datetime(2018, 1, 12)))
+    print('\nEvents between the 6th and 12th (midnight)')
+    for event in query:
+        print(event.key, event.timestamp, event.counter)
+
     client.flushall()
