@@ -1,8 +1,15 @@
 import datetime
 import struct
+import sys
 import time
 
 from greendb import Client
+
+
+if sys.version_info[0] == 2:
+    unicode_type = unicode
+else:
+    unicode_type = str
 
 
 class Node(object):
@@ -49,6 +56,14 @@ class Expression(Node):
         return '<Expression: %s %s %s>' % (self.lhs, self.op, self.rhs)
 
 
+def encode(s):
+    if isinstance(s, bytes):
+        return s
+    elif isinstance(s, unicode_type):
+        return s.encode('utf8')
+    return str(s).encode('utf8')
+
+
 class Field(Node):
     _counter = 0
 
@@ -63,7 +78,7 @@ class Field(Node):
     def __repr__(self):
         return '<%s: %s.%s>' % (
             type(self),
-            self.model._meta.name,
+            self.model._meta.model_name,
             self.name)
 
     def bind(self, model, name):
@@ -77,53 +92,63 @@ class Field(Node):
         field.name = self.name
         return field
 
-    def db_value(self, value):
+    def serialize(self, value):
         return value
 
-    def python_value(self, value):
+    def deserialize(self, value):
         return value
+
+    def index_value(self, value):
+        return encode(value)
+
 
 class IntegerField(Field):
-    def python_value(self, value):
-        return int(value)
+    def index_value(self, value):
+        return struct.pack('>H', value)
+
 
 class LongField(Field):
-    def db_value(self, value):
+    def index_value(self, value):
         return struct.pack('>Q', value)
 
-    def python_value(self, value):
-        return struct.unpack('>Q', value)[0]
 
 class DateTimeField(Field):
-    def db_value(self, value):
+    def serialize(self, value):
         return value.strftime('%Y-%m-%d %H:%M:%S.%f')
 
-    def python_value(self, value):
+    def deserialize(self, value):
         return datetime.datetime.strptime(value, '%Y-%m-%d %H:%M:%S.%f')
 
-class DateField(Field):
-    def db_value(self, value):
-        return value.strftime('%Y-%m-%d')
-
-    def python_value(self, value):
-        return datetime.datetime.strptime(value, '%Y-%m-%d').date()
-
-class TimestampField(Field):
-    def __init__(self, index=False, default=datetime.datetime.now):
-        super(TimestampField, self).__init__(index=index, default=default)
-
-    def db_value(self, value):
+    def index_value(self, value):
         timestamp = time.mktime(value.timetuple())
         timestamp += value.microsecond * .000001
         timestamp = int(timestamp * 1e7)
         return struct.pack('>Q', timestamp)
 
-    def python_value(self, value):
+
+class TimestampField(Field):
+    def __init__(self, index=False, default=datetime.datetime.now):
+        super(TimestampField, self).__init__(index=index, default=default)
+
+    def serialize(self, value):
+        timestamp = time.mktime(value.timetuple())
+        timestamp += value.microsecond * .000001
+        timestamp = int(timestamp * 1e7)
+        return struct.pack('>Q', timestamp)
+
+    def deserialize(self, value):
         raw_ts, = struct.unpack('>Q', value)
         timestamp, micro = divmod(raw_ts, 1e7)
         return (datetime.datetime
                 .fromtimestamp(timestamp)
                 .replace(microsecond=int(micro)))
+
+    index_value = serialize
+
+
+class BooleanField(Field):
+    def index_value(self, value):
+        return b'\x01' if value else b'\x00'
 
 
 class FieldDescriptor(object):
@@ -187,7 +212,7 @@ class DeclarativeMeta(type):
 
         # Always have an `id` field.
         if 'id' not in fields:
-            fields['id'] = IntegerField()
+            fields['id'] = LongField()
 
         attrs['_meta'] = Metadata(name, client, db, index_db, fields)
         model = super(DeclarativeMeta, cls).__new__(cls, name, bases, attrs)
@@ -264,11 +289,15 @@ class Model(with_metaclass(DeclarativeMeta)):
 
     @classmethod
     def load(cls, primary_key):
-        return cls(**cls._read_model_data(primary_key))
+        data = cls._read_model_data(primary_key)
+        if data is None:
+            raise KeyError('%s with id=%s not found' %
+                           (cls._meta.name, primary_key))
+        return cls(**data)
 
     def save(self):
         if self.id and self._meta.indexes:
-            original_data = self._data
+            original_data = self._read_model_data(primary_key)
         else:
             original_data = None
 
@@ -286,41 +315,69 @@ class Model(with_metaclass(DeclarativeMeta)):
         # Retrieve the primary key identifying this model instance.
         key = self._meta.get_instance_key(self.id)
 
-        # Store all model data serialized in a single record.
-        #accum = {}
-        #for field in self._meta.sorted_fields:
-        #    accum[field.name] = field.db_value(self._data.get(field.name))
-        #self._meta.client.set(key, accum)
-        self._meta.client.set(key, self._data)
+        # Prepare the data for storage. Some Python data-types, e.g. datetimes,
+        # cannot be serialized natively by the greendb protocol, so we
+        # serialize them before writing.
+        accum = {}
+        for field in self._meta.sorted_fields:
+            value = self._data.get(field.name)
+            if value is not None:
+                accum[field.name] = field.serialize(value)
 
-    def _update_indexes(self, original_data):
+        self._meta.client.set(key, accum)  # Alt: .set(key, self._data).
+
+    def _update_indexes(self, original_data=None):
         primary_key = self.id
-        indexes = self._meta.indexes.items()
-
-        # If we are updating a row and the instance value differs from what was
-        # previously stored, remove the old value.
-        if original_data is not None:
-            for field, index in indexes:
-                if field in original_data:
-                    value = getattr(self, field)
-                    if original_data[field] != value:
-                        index.delete(value, primary_key)
 
         # Store current model data in the index.
-        for field, index in indexes:
-            index.store(getattr(self, field), primary_key)
+        for field_name, index in self._meta.indexes.items():
+            field = self._meta.fields[field_name]
+            new_value = self._data.get(field_name)
+            if original_data is not None and field_name in original_data:
+                old_value = original_data[field_name]
+                if old_value != new_value:
+                    index.delete(old_value, primary_key)
+
+            index.store(new_value, primary_key)
 
     @classmethod
-    def _read_model_data(cls, primary_key, fields=None):
+    def _read_model_data(cls, primary_key):
         key = cls._meta.get_instance_key(primary_key)
-        return cls._meta.client.get(key)
+        data = cls._meta.client.get(key)
+        if data is not None:
+            return cls._deserialize_raw_data(data)
 
-    def delete(self, atomic=True):
-        key = self._meta.get_instance_key(self.id)
+    @classmethod
+    def _deserialize_raw_data(cls, data):
+        accum = {}
+        for key, value in data.items():
+            field = cls._meta.fields.get(key)
+            if field is not None:
+                accum[key] = field.deserialize(value)
+            else:
+                accum[key] = value
+        return accum
+
+    def delete(self):
+        primary_key = self.id
+
+        # Load up original data if we have indexes to clean up.
+        if self._meta.indexes:
+            data = self._read_model_data(primary_key)
+        else:
+            data = None
+
+        # Delete the model data.
+        key = self._meta.get_instance_key(primary_key)
         self._meta.client.delete(key)
 
-        for field, index in self._meta.indexes.items():
-            index.delete(getattr(self, field), self.id)
+        # Clear out the indexes.
+        if data is not None:
+            for field_name, index in self._meta.indexes.items():
+                value = data.get(field_name) or self._data.get(field_name)
+                if value is not None:
+                    field = self._meta.fields[field_name]
+                    index.delete(value, self.id)
 
     @classmethod
     def get(cls, expr):
@@ -331,10 +388,12 @@ class Model(with_metaclass(DeclarativeMeta)):
     @classmethod
     def all(cls, count=None):
         accum = []
-        start = cls._meta.name + ':\x00'
-        stop = cls._meta.name + ':\xff'
+        prefix = encode(cls._meta.name)
+        start = prefix + b':\x00'
+        stop = prefix + b':\xff'
         for k, v in cls._meta.client.getrange(start, stop, count):
-            accum.append(cls(**v))
+            data = cls._deserialize_raw_data(v)
+            accum.append(cls(**data))
         return accum
 
     @classmethod
@@ -361,31 +420,20 @@ class Model(with_metaclass(DeclarativeMeta)):
         return [cls.load(primary_key) for primary_key in id_list]
 
 
-def _b(s):
-    if isinstance(s, bytes):
-        return s
-    elif isinstance(s, str):
-        return s.encode('utf8')
-    return str(s).encode('utf8')
-
-
 class Index(object):
     def __init__(self, client, index_db, field):
         self.client = client
         self.db = index_db
         self.field = field
-        self.key = _b('idx:%s:%s' % (field.model._meta.name, field.name))
-        self.stop_key = self.key + b'\xff'
-        self.encode_pk = field.model.id.db_value
-        self.decode_pk = field.model.id.python_value
+        self.key = 'idx:%s:%s' % (field.model._meta.name, field.name)
 
-    def convert(self, value):
-        return _b(self.field.db_value(value))
+        # Obtain references to serialization routine for query values, e.g.
+        # datetimes are stored as 64-bit unsigned integer microseconds. So when
+        # we receive a datetime, we need to convert the incoming user value.
+        self.convert = field.index_value
 
     def get_value(self, value, primary_key):
-        return b'%s\x00%s' % (
-            _b(self.field.db_value(value) or ''),
-            _b(self.encode_pk(primary_key)))
+        return b'%s\x00%s' % (self.convert(value), encode(primary_key))
 
     def store(self, value, primary_key):
         value = self.get_value(value, primary_key)
@@ -402,16 +450,13 @@ class Index(object):
         accum = []
         for raw_value in self._range_query(start, stop):
             delim_idx = raw_value.rfind(b'\x00')
-            accum.append(self.decode_pk(raw_value[delim_idx + 1:]))
+            accum.append(int(raw_value[delim_idx + 1:].decode('ascii')))
         return accum
 
     def query(self, value, operation):
         if operation == '=':
-            # Equality means range from value + delim, to value and any pk.
             bval = self.convert(value)
-            start = bval + b'\x00'
-            stop = bval + b'\x00\xff'
-            return self.get_range_values(start, stop)
+            return self.get_range_values(bval + b'\x00', bval + b'\x00\xff')
         elif operation in ('<', '<='):
             bval = self.convert(value)
             stop = bval + (b'\x00\x00' if operation == '<' else b'\x00\xff')
@@ -432,7 +477,7 @@ class Index(object):
             for raw_value in self._range_query():
                 idx_value, pk = raw_value.rsplit(b'\x00', 1)
                 if bval != idx_value:
-                    accum.append(self.decode_pk(pk))
+                    accum.append(int(pk.decode('ascii')))
             return accum
         elif operation == 'startswith':
             bval = self.convert(value)
