@@ -134,7 +134,7 @@ class DateTimeField(Field):
     def index_value(self, value):
         timestamp = time.mktime(value.timetuple())
         timestamp += value.microsecond * .000001
-        timestamp = int(timestamp * 1e7)
+        timestamp = int(timestamp * 1e6)
         return struct.pack('>Q', timestamp)
 
 
@@ -145,12 +145,12 @@ class TimestampField(Field):
     def serialize(self, value):
         timestamp = time.mktime(value.timetuple())
         timestamp += value.microsecond * .000001
-        timestamp = int(timestamp * 1e7)
+        timestamp = int(timestamp * 1e6)
         return struct.pack('>Q', timestamp)
 
     def deserialize(self, value):
         raw_ts, = struct.unpack('>Q', value)
-        timestamp, micro = divmod(raw_ts, 1e7)
+        timestamp, micro = divmod(raw_ts, 1e6)
         return (datetime.datetime
                 .fromtimestamp(timestamp)
                 .replace(microsecond=int(micro)))
@@ -353,7 +353,8 @@ class Model(with_metaclass(DeclarativeMeta)):
                 if old_value != new_value:
                     index.delete(old_value, primary_key)
 
-            index.store(new_value, primary_key)
+            if new_value is not None:
+                index.store(new_value, primary_key)
 
     @classmethod
     def _read_model_data(cls, primary_key):
@@ -435,7 +436,7 @@ class Model(with_metaclass(DeclarativeMeta)):
         id_list = dfs(expr)
 
         # Bulk-load the model data, creating a mapping of model key -> int id.
-        keys = [cls._meta.get_instance_key(pk) for pk in id_list]
+        keys = [encode(cls._meta.get_instance_key(pk)) for pk in id_list]
         key_to_data = cls._meta.client.mget(keys)
 
         deserialize = cls._deserialize_raw_data
@@ -507,74 +508,3 @@ class Index(object):
             return self.get_range_values(bval, bval + b'\xff')
         else:
             raise ValueError('unrecognized operation: "%s"' % operation)
-
-
-if __name__ == '__main__':
-    client = Client()
-    client.flushall()
-
-    class User(Model):
-        username = Field(index=True)
-        status = Field(index=True)
-
-        class Meta:
-            client = client
-
-    username_status = (
-        ('huey', 1),
-        ('mickey', 0),
-        ('zaizee', 1),
-        ('beanie', 2),
-        ('gracie', 0),
-        ('rocky', 0),
-        ('rocky-2', 0),
-        ('rocky-3', 0),
-    )
-    for username, status in username_status:
-        User.create(username=username, status=status)
-
-    u_db = User.load(1)
-    print(u_db.username)
-    print(u_db._data)
-
-    print('All users')
-    for user in User.all():
-        print(user.id, user.username, user.status)
-
-    print('\nUsers between "huey" and "rocky" (inclusive)')
-    query = User.query(User.username.between('huey', 'rocky', True, True))
-    for user in query:
-        print(user.id, user.username, user.status)
-
-    print('\nUsers with status >= 1')
-    for user in User.query(User.status >= '1'):
-        print(user.id, user.username, user.status)
-
-    print('\nKeys')
-    print(client.keys())
-    print(client.keys(db=15))
-    client.flushall()
-
-    class Event(Model):
-        key = Field(index=True)
-        timestamp = TimestampField(index=True)
-        counter = LongField(index=True)
-        class Meta:
-            client = client
-
-    for i in range(1, 20):
-        ts = datetime.datetime(2018, 1, i, i, 0, 0)
-        Event.create(key='e%s' % i, timestamp=ts, counter=i)
-
-    print('\nAll events')
-    for event in Event.all():
-        print(event.key, event.timestamp, event.counter)
-
-    query = Event.query(Event.timestamp.between(
-        datetime.datetime(2018, 1, 6),
-        datetime.datetime(2018, 1, 12)))
-    print('\nEvents between the 6th and 12th (midnight)')
-    for event in query:
-        print(event.key, event.timestamp, event.counter)
-
-    client.flushall()

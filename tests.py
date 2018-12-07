@@ -2,6 +2,7 @@
 
 from __future__ import unicode_literals  # Required for 2.x compatability.
 
+import datetime
 import logging
 import os
 import shutil
@@ -729,11 +730,65 @@ class Misc(Base):
     f_l = LongField(index=True)
     f_dt = DateTimeField(index=True)
     f_ts = TimestampField(index=True)
-    f_b = BooleanField()
+    f_b = BooleanField(index=True)
 
 
 class TestGreenQuery(BaseTestCase):
-    def test_basic_operations(self):
+    def test_field_type_serialization(self):
+        make_dt = lambda d: datetime.datetime(2018, 1, d, d, 0, 0)
+        for i in range(1, 11):
+            dt = make_dt(i)
+            Misc.create(f='f%s' % i, f_i=i, f_l=i * 1000, f_dt=dt, f_ts=dt,
+                        f_b=(i % 3 == 1))
+
+        def assertQ(expr, nums):
+            query = Misc.query(expr)
+            rows = [(m.f, m.f_i, m.f_l, m.f_dt, m.f_ts, m.f_b) for m in query]
+            expected = [('f%s' % n, n, n * 1000, make_dt(n), make_dt(n),
+                         int(n % 3 == 1)) for n in nums]
+            self.assertEqual(rows, expected)
+
+        assertQ((Misc.f_i == 5), [5])
+        assertQ((Misc.f_i > 8), [9, 10])
+        assertQ((Misc.f_i >= 8), [8, 9, 10])
+        assertQ((Misc.f_i < 3), [1, 2])
+        assertQ((Misc.f_i <= 3), [1, 2, 3])
+        assertQ(Misc.f_i.between(3, 6), [3, 4, 5])
+        assertQ(Misc.f_i.between(3, 6, False, True), [4, 5, 6])
+
+        assertQ((Misc.f_l == 5000), [5])
+        assertQ((Misc.f_l > 8000), [9, 10])
+        assertQ((Misc.f_l <= 3000), [1, 2, 3])
+
+        for field in (Misc.f_dt, Misc.f_ts):
+            assertQ((field == make_dt(5)), [5])
+            assertQ((field > make_dt(8)), [9, 10])
+            assertQ((field >= make_dt(8)), [8, 9, 10])
+            assertQ((field < make_dt(3)), [1, 2])
+            assertQ((field <= make_dt(3)), [1, 2, 3])
+            assertQ(field.between(make_dt(3), make_dt(6)), [3, 4, 5])
+            assertQ(field.between(make_dt(3), make_dt(6), False, True),
+                    [4, 5, 6])
+
+        assertQ((Misc.f_b == True), [1, 10, 4, 7])
+        assertQ((Misc.f_b != False), [1, 10, 4, 7])
+        assertQ((Misc.f_b == False), [2, 3, 5, 6, 8, 9])
+        assertQ((Misc.f_b != True), [2, 3, 5, 6, 8, 9])
+
+    def test_field_data_types(self):
+        # As long as the field is not indexed, we can store arbitrary data.
+        # When the field *is* indexed, the field class must implement an
+        # "index_value()" method to handle the appropriate conversion.
+        Misc.create(f={'k1': 'v1', 'k2': 'v2'}, f_i=1)
+        Misc.create(f=['foo', 'bar', 'baz'], f_i=2)
+
+        m1 = Misc.get(Misc.f_i == 1)
+        m2 = Misc.get(Misc.f_i == 2)
+
+        self.assertEqual(m1.f, {'k1': 'v1', 'k2': 'v2'})
+        self.assertEqual(m2.f, ['foo', 'bar', 'baz'])
+
+    def _create_test_users(self):
         username_status = (
             ('huey', 1),
             ('mickey', 0),
@@ -745,6 +800,10 @@ class TestGreenQuery(BaseTestCase):
         )
         for username, status in username_status:
             User.create(username=username, status=status)
+        return username_status
+
+    def test_basic_operations(self):
+        username_status = self._create_test_users()
 
         u_db = User.load(2)
         self.assertEqual(u_db.id, 2)
@@ -812,6 +871,27 @@ class TestGreenQuery(BaseTestCase):
         assertQ((User.status >= 1), ['huey', 'zaizee'])
         assertQ((User.status < 1), ['mickey'])
         assertQ((User.status != 0), ['huey', 'zaizee'])
+
+    def test_compound_queries(self):
+        username_status = self._create_test_users()
+
+        def assertQ(expr, usernames):
+            query = User.query(expr)
+            self.assertEqual([u.username for u in query], usernames)
+
+        assertQ((User.username == 'huey') | (User.username == 'zaizee'),
+                ['huey', 'zaizee'])
+        assertQ((User.username == 'huey') | (User.status == 1),
+                ['huey', 'zaizee'])
+        assertQ((User.username == 'huey') | (User.status == 2),
+                ['huey', 'beanie'])
+        assertQ((User.username == 'huey') & (User.status == 1), ['huey'])
+        assertQ((User.username == 'huey') & (User.status != 1), [])
+
+        assertQ((User.username.startswith('h') |
+                 User.username.startswith('b') |
+                 User.username.startswith('r')),
+                ['huey', 'beanie', 'rocky', 'rocky-2'])
 
 
 if __name__ == '__main__':
