@@ -6,6 +6,18 @@ import time
 from greendb import Client
 
 
+__all__ = [
+    'Client',
+    'Field',
+    'IntegerField',
+    'LongField',
+    'DateTimeField',
+    'TimestampField',
+    'BooleanField',
+    'Model',
+]
+
+
 if sys.version_info[0] == 2:
     unicode_type = unicode
 else:
@@ -241,6 +253,9 @@ class Metadata(object):
         self.defaults = {}
         self.defaults_callable = {}
 
+    def set_client(self, client):
+        self.client = client
+
     def prepared(self):
         self.sorted_fields = sorted(
             [field for field in self.fields.values()],
@@ -416,8 +431,15 @@ class Model(with_metaclass(DeclarativeMeta)):
             else:
                 raise ValueError('Unable to execute query, unexpected type.')
 
+        # Collect raw list of integer IDs.
         id_list = dfs(expr)
-        return [cls.load(primary_key) for primary_key in id_list]
+
+        # Bulk-load the model data, creating a mapping of model key -> int id.
+        keys = [cls._meta.get_instance_key(pk) for pk in id_list]
+        key_to_data = cls._meta.client.mget(keys)
+
+        deserialize = cls._deserialize_raw_data
+        return [cls(**deserialize(key_to_data[key])) for key in keys]
 
 
 class Index(object):
@@ -474,6 +496,7 @@ class Index(object):
             return self.get_range_values(start, stop)
         elif operation == '!=':
             bval = self.convert(value)
+            accum = []
             for raw_value in self._range_query():
                 idx_value, pk = raw_value.rsplit(b'\x00', 1)
                 if bval != idx_value:

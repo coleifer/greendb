@@ -15,6 +15,7 @@ from greendb import Client
 from greendb import CommandError
 from greendb import Server
 from greendb import logger
+from greenquery import *
 
 
 TEST_HOST = '127.0.0.1'
@@ -710,6 +711,107 @@ class TestBasicOperations(BaseTestCase):
 
         # The value from our call to "use()" is preserved.
         self.assertEqual(self.c.get('k1'), 'v1-2')
+
+
+class Base(Model):
+    class Meta:
+        client = Client(host=TEST_HOST, port=TEST_PORT)
+        database = 0
+        index_db = 3
+
+class User(Base):
+    username = Field(index=True)
+    status = IntegerField(index=True)
+
+class Misc(Base):
+    f = Field()
+    f_i = IntegerField(index=True)
+    f_l = LongField(index=True)
+    f_dt = DateTimeField(index=True)
+    f_ts = TimestampField(index=True)
+    f_b = BooleanField()
+
+
+class TestGreenQuery(BaseTestCase):
+    def test_basic_operations(self):
+        username_status = (
+            ('huey', 1),
+            ('mickey', 0),
+            ('zaizee', 1),
+            ('beanie', 2),
+            ('gracie', 0),
+            ('rocky', 0),
+            ('rocky-2', 0),
+        )
+        for username, status in username_status:
+            User.create(username=username, status=status)
+
+        u_db = User.load(2)
+        self.assertEqual(u_db.id, 2)
+        self.assertEqual(u_db.username, 'mickey')
+        self.assertEqual(u_db.status, 0)
+
+        self.assertRaises(KeyError, User.load, 99)
+
+        # We can retrieve all users, sorted by primary key.
+        all_users = [user.username for user in User.all()]
+        self.assertEqual(all_users, [u for u, _ in username_status])
+
+        # We can apply a limit.
+        some_users = [user.username for user in User.all(3)]
+        self.assertEqual(some_users, ['huey', 'mickey', 'zaizee'])
+
+        # Query a single object using equality.
+        huey = User.get(User.username == 'huey')
+        self.assertEqual(huey.id, 1)
+        self.assertEqual(huey.username, 'huey')
+
+        def assertQ(expr, usernames):
+            query = User.query(expr)
+            self.assertEqual([u.username for u in query], usernames)
+
+        # Query using ranges.
+        assertQ(User.username.between('huey', 'rocky'), ['huey', 'mickey'])
+        assertQ(User.username.between('huey', 'rocky', True, True),
+                ['huey', 'mickey', 'rocky'])  # Inclusive.
+        assertQ((User.username >= 'rocky'), ['rocky', 'rocky-2', 'zaizee'])
+        assertQ((User.username > 'rocky'), ['rocky-2', 'zaizee'])
+        assertQ((User.username <= 'rocky'),
+                ['beanie', 'gracie', 'huey', 'mickey', 'rocky'])
+        assertQ((User.username < 'rocky'),
+                ['beanie', 'gracie', 'huey', 'mickey'])
+        assertQ((User.username == 'mickey'), ['mickey'])
+        assertQ(User.username.startswith('ro'), ['rocky', 'rocky-2'])
+        assertQ(User.username.startswith('rocky'), ['rocky', 'rocky-2'])
+        assertQ(User.username.startswith('rocky '), [])
+
+        assertQ((User.status > 1), ['beanie'])
+        assertQ((User.status >= 1), ['huey', 'zaizee', 'beanie'])
+        assertQ((User.status < 1), ['mickey', 'gracie', 'rocky', 'rocky-2'])
+        assertQ((User.status != 0), ['huey', 'zaizee', 'beanie'])
+
+        # Delete objects.
+        for username in ('rocky', 'rocky-2', 'gracie', 'beanie'):
+            user = User.get(User.username == username)
+            user.delete()
+
+        # Validate query results after deletions.
+        self.assertEqual([u.username for u in User.all()],
+                         ['huey', 'mickey', 'zaizee'])
+        assertQ(User.username.between('huey', 'rocky', True, True),
+                ['huey', 'mickey'])
+        assertQ((User.username >= 'rocky'), ['zaizee'])
+        assertQ((User.username > 'rocky'), ['zaizee'])
+        assertQ((User.username <= 'rocky'), ['huey', 'mickey'])
+        assertQ((User.username < 'rocky'), ['huey', 'mickey'])
+        assertQ((User.username == 'mickey'), ['mickey'])
+        assertQ(User.username.startswith('h'), ['huey'])
+        assertQ(User.username.startswith('r'), [])
+
+        assertQ((User.status > 1), [])
+        assertQ((User.status >= 1), ['huey', 'zaizee'])
+        assertQ((User.status < 1), ['mickey'])
+        assertQ((User.status != 0), ['huey', 'zaizee'])
 
 
 if __name__ == '__main__':
