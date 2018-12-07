@@ -15,7 +15,11 @@ def get_sleep_set(k, v, n=1):
     #time.sleep(n)
     client._sleep(n)
     assert client.get(k) == v
-
+    data = {b'%s-%032d' % (k, i): 'v%01024d' % i for i in range(100)}
+    client.mset(data)
+    resp = client.mget([b'%s-%032d' % (k, i) for i in range(100)])
+    assert resp == data
+    # client.close()  # If this were a real app, we would put this here.
 
 n = 1
 t = 100
