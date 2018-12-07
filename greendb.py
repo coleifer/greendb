@@ -894,7 +894,7 @@ class Server(object):
                 value = cursor.value()
                 if stop is not None and value > stop:
                     break
-                accum.append(decode(value))
+                accum.append(value)
                 count -= 1
                 if count == 0 or not cursor.next_dup():
                     break

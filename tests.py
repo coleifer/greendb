@@ -644,7 +644,8 @@ class TestBasicOperations(BaseTestCase):
         # upper-bound.
         def assertR(start, stop, expected):
             res = self.c.getrangedupraw('u:username', start, stop)
-            self.assertEqual([int(r.rsplit(' ', 1)[1]) for r in res], expected)
+            pks = [int(r.decode('utf8').rsplit(' ', 1)[1]) for r in res]
+            self.assertEqual(pks, expected)
 
         # Verify inclusiveness of both boundaries in this scheme.
         assertR('zaizee ', 'zaizee ', [])
@@ -682,7 +683,8 @@ class TestBasicOperations(BaseTestCase):
         # Status test.
         def assertS(start, stop, expected):
             res = self.c.getrangedupraw('u:status', start, stop)
-            self.assertEqual([int(r.rsplit(' ', 1)[1]) for r in res], expected)
+            pks = [int(r.decode('utf8').rsplit(' ', 1)[1]) for r in res]
+            self.assertEqual(pks, expected)
 
         assertS('0 ', '0 ~', [3, 5, 6, 7, 8])
         assertS('1 ', '1 ~', [1, 2, 4])
