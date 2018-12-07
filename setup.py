@@ -20,7 +20,7 @@ setup(
     author_email='coleifer@gmail.com',
     url='http://github.com/coleifer/greendb/',
     packages=[],
-    py_modules=['greendb'],
+    py_modules=['greendb', 'greenquery'],
     install_requires=['lmdb', 'gevent', 'msgpack-python'],
     classifiers=[
         'Development Status :: 4 - Beta',
