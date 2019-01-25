@@ -68,7 +68,7 @@ class TestBasicOperations(BaseTestCase):
             b'foo',
             b'\xff\x00\xff',
             'foo',
-            '\u2012\u2013',
+            '\u2012\u2013'.encode('utf8'),
             0,
             1337,
             -1,

@@ -93,12 +93,15 @@ class CommandError(Exception):
 
 
 Error = namedtuple('Error', ('message',))
+Attributes = namedtuple('Attributes', ('data',))
 ProcessingInstruction = namedtuple('ProcessingInstruction', ('op', 'value'))
+VerbatimString = namedtuple('VerbatimString', ('text', 'prefix'))
 
 PI_USE_DB = b'\x01'
 PROCESSING_INSTRUCTIONS = set((PI_USE_DB,))
 
 CRLF = b'\r\n'
+MAXINT = 1 << 63
 READSIZE = 4 * 1024
 
 
@@ -253,67 +256,79 @@ class _Socket(object):
 
 
 class ProtocolHandler(object):
+    def __init__(self):
+        self.handlers = {
+            b'*': self.handle_array,
+            b'$': self.handle_blob,
+            b'+': self.handle_simple_string,
+            b'-': self.handle_simple_error,
+            b':': self.handle_number,
+            b'_': self.handle_null,
+            b',': self.handle_float,
+            b'#': self.handle_boolean,
+            b'!': self.handle_error,
+            b'=': self.handle_verbatim_string,
+            b'(': self.handle_number,
+            b'%': self.handle_dict,
+            b'~': self.handle_set,
+            b'|': self.handle_attributes,
+            b'>': self.handle_push,
+            b'.': self.handle_processing_instruction,
+        }
+
     def handle(self, sock):
         first_byte = sock._read(1)
-        if first_byte == b'$':
-            return self.handle_string(sock)
-        elif first_byte == b'^':
-            return self.handle_unicode(sock)
-        elif first_byte == b':':
-            return self.handle_integer(sock)
-        elif first_byte == b'.':
-            return self.handle_processing_instruction(sock)
-        elif first_byte == b'*':
-            return self.handle_array(sock)
-        elif first_byte == b'%':
-            return self.handle_dict(sock)
-        elif first_byte == b'+':
-            return self.handle_simple_string(sock)
-        elif first_byte == b'-':
-            return self.handle_error(sock)
-        elif first_byte == b'~':
-            return self.handle_float(sock)
-
-        # Do no special handling and treat as a raw bytestring.
-        rest = sock.readline()
-        return first_byte + rest
-
-    def handle_simple_string(self, sock):
-        return sock.readline()
-
-    def handle_error(self, sock):
-        return Error(sock.readline())
-
-    def handle_integer(self, sock):
-        number = sock.readline()
-        if b'.' in number:
-            return float(number)
-        return int(number)
-
-    def handle_float(self, sock):
-        val, = struct.unpack('>d', sock.read(8))
-        return val
-
-    def handle_processing_instruction(self, sock):
-        instruction = sock.read(1)
-        if instruction not in PROCESSING_INSTRUCTIONS:
-            raise ValueError('unrecognized processing instruction, refusing to'
-                             ' process.')
-        return ProcessingInstruction(instruction, self.handle(sock))
-
-    def handle_string(self, sock):
-        length = int(sock.readline())
-        if length >= 0:
-            return sock.read(length)
-
-    def handle_unicode(self, sock):
-        length = int(sock.readline())
-        if length >= 0:
-            return sock.read(length).decode('utf-8')
+        try:
+            return self.handlers[first_byte](sock)
+        except KeyError:
+            # Handle un-encoded data as a raw simple string.
+            rest = sock.readline()
+            return first_byte + rest
 
     def handle_array(self, sock):
         num_elements = int(sock.readline())
         return [self.handle(sock) for _ in range(num_elements)]
+
+    def handle_blob(self, sock):
+        length = int(sock.readline())
+        if length >= 0:
+            return sock.read(length)
+
+    def handle_simple_string(self, sock):
+        return sock.readline()
+
+    def handle_simple_error(self, sock):
+        return Error(sock.readline())
+
+    def handle_number(self, sock):
+        return int(sock.readline())
+
+    def handle_null(self, sock):
+        sock.readline()
+        return
+
+    def handle_float(self, sock):
+        return float(sock.readline())
+
+    def handle_boolean(self, sock):
+        next_byte = sock.read(1)
+        if next_byte == b't' or next_byte == b'T':
+            return True
+        elif next_byte == b'f' or next_byte == b'F':
+            return False
+        raise ValueError('unsupported value for boolean type')
+
+    def handle_error(self, sock):
+        length = int(sock.readline())
+        if length >= 0:
+            return Error(sock.read(length))
+
+    def handle_verbatim_string(self, sock):
+        length = int(sock.readline())
+        if length >= 0:
+            data = sock.read(length).decode('utf8')
+            prefix, rest = data[:3], data[4:]
+            return VerbatimString(rest, prefix)
 
     def handle_dict(self, sock):
         accum = {}
@@ -322,6 +337,27 @@ class ProtocolHandler(object):
             key = self.handle(sock)
             accum[key] = self.handle(sock)
         return accum
+
+    def handle_set(self, sock):
+        return set(self.handle_array(sock))
+
+    def handle_attributes(self, sock):
+        accum = {}
+        num_items = int(sock.readline())
+        for _ in range(num_items):
+            key = self.handle(sock)
+            accum[key] = self.handle(sock)
+        return Attributes(accum)
+
+    def handle_push(self, sock):
+        pass
+
+    def handle_processing_instruction(self, sock):
+        instruction = sock.read(1)
+        if instruction not in PROCESSING_INSTRUCTIONS:
+            raise ValueError('unrecognized processing instruction, refusing to'
+                             ' process.')
+        return ProcessingInstruction(instruction, self.handle(sock))
 
     def write_response(self, sock, data, blocking=False):
         self._write(sock, data)
@@ -332,20 +368,35 @@ class ProtocolHandler(object):
             sock.write(b'$%d\r\n%s\r\n' % (len(data), data))
         elif isinstance(data, unicode):
             data = encode(data)
-            sock.write(b'^%d\r\n%s\r\n' % (len(data), data))
+            sock.write(b'$%d\r\n%s\r\n' % (len(data), data))
         elif data is True or data is False:
-            sock.write(b':%d\r\n' % (1 if data else 0))
+            sock.write(b'#%s\r\n' % (b't' if data else b'f'))
         elif isinstance(data, int_types):
-            sock.write(b':%d\r\n' % data)
+            if data > MAXINT:
+                sock.write(b'(%d\r\n' % data)
+            else:
+                sock.write(b':%d\r\n' % data)
         elif data is None:
-            sock.write(b'$-1\r\n')
+            sock.write(b'_\r\n')
         elif isinstance(data, Error):
-            sock.write(b'-%s\r\n' % encode(data.message))
+            error = encode(data.message)
+            sock.write(b'!%d\r\n%s\r\n' % (len(error), error))
         elif isinstance(data, ProcessingInstruction):
             sock.write(b'.%s\r\n' % encode(data.op))
             self._write(sock, data.value)
+        elif isinstance(data, VerbatimString):
+            prefix = encode(data.prefix)
+            data = encode(data.text)
+            nchars = len(prefix) + len(data) + 1
+            sock.write(b'=%d\r\n%s:%s\r\n' % (nchars, prefix, data))
+        elif isinstance(data, float):
+            sock.write(b',%0.8f\r\n' % data)
         elif isinstance(data, (list, tuple)):
             sock.write(b'*%d\r\n' % len(data))
+            for item in data:
+                self._write(sock, item)
+        elif isinstance(data, set):
+            sock.write(b'~%d\r\n' % len(data))
             for item in data:
                 self._write(sock, item)
         elif isinstance(data, dict):
@@ -353,10 +404,15 @@ class ProtocolHandler(object):
             for key in data:
                 self._write(sock, key)
                 self._write(sock, data[key])
-        elif isinstance(data, float):
-            sock.write(b'~%s\r\n' % struct.pack('>d', data))
+        elif isinstance(data, Attributes):
+            attributes = data.data
+            sock.write(b'|%d\r\n' % len(attributes))
+            for key in attributes:
+                self._write(sock, key)
+                self._write(sock, attributes[key])
         else:
             raise ValueError('unrecognized type')
+
 
 
 DEFAULT_MAP_SIZE = 1024 * 1024 * 256  # 256MB.
