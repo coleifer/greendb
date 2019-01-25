@@ -21,6 +21,7 @@ With greendb, database keys are always bytestrings. Values may be:
 * list
 * set
 * bytestrings
+* unicode strings
 * integers
 * floating-point
 * boolean
@@ -468,6 +469,9 @@ using the lower-case command name as the method name**.
 
 #### protocol
 
-The protocol is the Redis RESPv3 protocol.
+The protocol is the Redis RESPv3 protocol. I have extended the protocol with
+one additional data-type, a dedicated type for representing UTF8-encoded
+unicode text (notably absent from RESPv3). This type is denoted by the leading
+`^` byte in responses.
 
 Details can be found here: https://github.com/antirez/RESP3/blob/master/spec.md

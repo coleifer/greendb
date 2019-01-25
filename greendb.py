@@ -260,6 +260,7 @@ class ProtocolHandler(object):
         self.handlers = {
             b'*': self.handle_array,
             b'$': self.handle_blob,
+            b'^': self.handle_unicode_string,
             b'+': self.handle_simple_string,
             b'-': self.handle_simple_error,
             b':': self.handle_number,
@@ -293,6 +294,11 @@ class ProtocolHandler(object):
         length = int(sock.readline())
         if length >= 0:
             return sock.read(length)
+
+    def handle_unicode_string(self, sock):
+        length = int(sock.readline())
+        if length >= 0:
+            return sock.read(length).decode('utf8')
 
     def handle_simple_string(self, sock):
         return sock.readline()
@@ -368,7 +374,7 @@ class ProtocolHandler(object):
             sock.write(b'$%d\r\n%s\r\n' % (len(data), data))
         elif isinstance(data, unicode):
             data = encode(data)
-            sock.write(b'$%d\r\n%s\r\n' % (len(data), data))
+            sock.write(b'^%d\r\n%s\r\n' % (len(data), data))
         elif data is True or data is False:
             sock.write(b'#%s\r\n' % (b't' if data else b'f'))
         elif isinstance(data, int_types):
