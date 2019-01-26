@@ -713,6 +713,12 @@ class TestBasicOperations(BaseTestCase):
         # The value from our call to "use()" is preserved.
         self.assertEqual(self.c.get('k1'), 'v1-2')
 
+    def test_sleep_attributes(self):
+        resp, attrs = self.c._sleep(0.1)
+        self.assertEqual(resp, 0.1)
+        self.assertTrue('start' in attrs.data)
+        self.assertTrue('stop' in attrs.data)
+
 
 class Base(Model):
     class Meta:

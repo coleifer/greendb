@@ -93,9 +93,25 @@ class CommandError(Exception):
 
 
 Error = namedtuple('Error', ('message',))
-Attributes = namedtuple('Attributes', ('data',))
+class Attributes(object):
+    __slots__ = ('data',)
+    def __init__(self, data=None):
+        self.data = data or {}
+    def __getitem__(self, key):
+        return self.data[key]
+    def __iter__(self):
+        return iter(self.data.items())
+    def __len__(self):
+        return len(self.data)
 ProcessingInstruction = namedtuple('ProcessingInstruction', ('op', 'value'))
 VerbatimString = namedtuple('VerbatimString', ('text', 'prefix'))
+
+# Composite type for representing a response plus some attributes.
+_AttributeResponse = namedtuple('_AttributeResponse', ('data', 'attributes'))
+class AttributeResponse(_AttributeResponse):
+    def __new__(cls, data, **attrs):
+        attributes = Attributes(attrs)
+        return super(AttributeResponse, cls).__new__(cls, data, attributes)
 
 PI_USE_DB = b'\x01'
 PROCESSING_INSTRUCTIONS = set((PI_USE_DB,))
@@ -390,11 +406,22 @@ class ProtocolHandler(object):
         elif isinstance(data, ProcessingInstruction):
             sock.write(b'.%s\r\n' % encode(data.op))
             self._write(sock, data.value)
+        elif isinstance(data, AttributeResponse):
+            # Handle a composite response-type, consisting of attributes and
+            # the actual response data.
+            self._write(sock, data.attributes)
+            self._write(sock, data.data)
         elif isinstance(data, VerbatimString):
             prefix = encode(data.prefix)
             data = encode(data.text)
             nchars = len(prefix) + len(data) + 1
             sock.write(b'=%d\r\n%s:%s\r\n' % (nchars, prefix, data))
+        elif isinstance(data, Attributes):
+            attributes = data.data
+            sock.write(b'|%d\r\n' % len(attributes))
+            for key in attributes:
+                self._write(sock, key)
+                self._write(sock, attributes[key])
         elif isinstance(data, float):
             sock.write(b',%0.8f\r\n' % data)
         elif isinstance(data, (list, tuple)):
@@ -410,12 +437,6 @@ class ProtocolHandler(object):
             for key in data:
                 self._write(sock, key)
                 self._write(sock, data[key])
-        elif isinstance(data, Attributes):
-            attributes = data.data
-            sock.write(b'|%d\r\n' % len(attributes))
-            for key in attributes:
-                self._write(sock, key)
-                self._write(sock, attributes[key])
         else:
             raise ValueError('unrecognized type')
 
@@ -984,8 +1005,10 @@ class Server(object):
 
     # Client operations.
     def client_sleep(self, client, timeout=1):
+        start = time.time()
         gevent.sleep(timeout)
-        return timeout
+        stop = time.time()
+        return AttributeResponse(timeout, start=start, stop=stop)
 
     def client_quit(self, client):
         raise ClientQuit('client closed connection')
@@ -1141,7 +1164,14 @@ class Client(object):
         # Execute the command. The command and its arguments (if it has any)
         # are all packed into a tuple and written to the server as a list.
         self._protocol.write_response(conn, (cmd,) + args)
-        return self.read_response(conn, close_conn)
+
+        # If the response is of type `Attributes`, continue reading the next
+        # response.
+        resp = self.read_response(conn, close_conn)
+        if isinstance(resp, Attributes):
+            return self.read_response(conn, False), resp
+        else:
+            return resp
 
     def command(cmd, close_conn=False):
         def method(self, *args, **kwargs):
