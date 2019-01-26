@@ -97,6 +97,8 @@ class Attributes(object):
     __slots__ = ('data',)
     def __init__(self, data=None):
         self.data = data or {}
+    def __repr__(self):
+        return '<Attributes: %r>' % self.data
     def __getitem__(self, key):
         return self.data[key]
     def __iter__(self):
