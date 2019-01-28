@@ -374,7 +374,9 @@ class ProtocolHandler(object):
         return Attributes(accum)
 
     def handle_push(self, sock):
-        pass
+        # Push data is represented same as Array type. First value is a string,
+        # indicating the type of data being pushed.
+        return self.handle_array(sock)
 
     def handle_processing_instruction(self, sock):
         instruction = sock.read(1)
