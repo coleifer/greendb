@@ -15,7 +15,7 @@ setup(
     name='greendb',
     version=version,
     description='greendb',
-    long_description=readme,
+    long_description='greendb',
     author='Charles Leifer',
     author_email='coleifer@gmail.com',
     url='http://github.com/coleifer/greendb/',
