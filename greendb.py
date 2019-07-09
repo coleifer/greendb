@@ -672,6 +672,7 @@ class Server(object):
             ('DELETERANGE', self.deleterange),
             ('GETRANGE', self.getrange),
             ('GETRANGEDUPRAW', self.getrangedupraw),
+            ('GETRANGERAW', self.getrangeraw),
             ('ITEMS', self.getrange),
             ('KEYS', self.keys),
             ('PREFIX', self.match_prefix),
@@ -1018,6 +1019,12 @@ class Server(object):
 
         return accum
 
+    def getrangeraw(self, client, start=None, stop=None, count=None):
+        def cb(cursor):
+            key, value = cursor.item()
+            return key, (key, value)
+        return self._cursor_op(client, start, stop, count, cb)
+
     def keys(self, client, start=None, stop=None, count=None):
         def cb(cursor):
             key = cursor.key()
@@ -1260,6 +1267,7 @@ class Client(object):
     deleterange = command('DELETERANGE')
     getrange = command('GETRANGE')
     getrangedupraw = command('GETRANGEDUPRAW')
+    getrangeraw = command('GETRANGERAW')
     items = command('ITEMS')
     keys = command('KEYS')
     prefix = command('PREFIX')
