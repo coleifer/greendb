@@ -194,6 +194,16 @@ class TestBasicOperations(BaseTestCase):
         self.assertEqual(self.c.getraw('key'), b'abc')
         self.assertTrue(self.c.getraw('x') is None)
 
+        # Unicode values are encoded as UTF8 automatically.
+        self.assertEqual(self.c.setraw('key', u'\u2021'), 1)
+        self.assertEqual(self.c.getraw('key'), b'\xe2\x80\xa1')
+
+        data = {'k1': b'v1', 'k2': u'\u2021'}
+        self.assertEqual(self.c.msetraw(data), 2)
+        self.assertEqual(self.c.mgetraw(['k1', 'k2', 'kx']), {
+            b'k1': b'v1',
+            b'k2': b'\xe2\x80\xa1'})
+
     def test_crud_dupsort(self):
         # Use the DB with dupsort enabled.
         self.c.use(3)

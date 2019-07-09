@@ -589,6 +589,10 @@ def mpackdict(d):
     for key, value in d.items():
         yield (encode(key), mpackb(value))
 
+def encodedict(d):
+    for key, value in d.items():
+        yield (encode(key), encode(value))
+
 
 def requires_dupsort(meth):
     @wraps(meth)
@@ -656,11 +660,13 @@ class Server(object):
             ('MDELETE', self.mdelete),
             ('MGET', self.mget),
             ('MGETDUP', self.mgetdup),
+            ('MGETRAW', self.mgetraw),
             ('MPOP', self.mpop),
             ('MREPLACE', self.mreplace),
             ('MSET', self.mset),
             ('MSETDUP', self.msetdup),
             ('MSETNX', self.msetnx),
+            ('MSETRAW', self.msetraw),
 
             # Cursor operations.
             ('DELETERANGE', self.deleterange),
@@ -879,6 +885,15 @@ class Server(object):
                     accum[key] = values
         return accum
 
+    def mgetraw(self, client, keys):
+        accum = {}
+        with client.ctx() as txn:
+            for key in map(encode, keys):
+                res = txn.get(key)
+                if res is not None:
+                    accum[key] = res
+        return accum
+
     def mpop(self, client, keys):
         accum = {}
         with client.cursor(True) as cursor:
@@ -912,6 +927,11 @@ class Server(object):
         with client.cursor(True) as cursor:
             consumed, added = cursor.putmulti(mpackdict(data), dupdata=False,
                                               overwrite=False)
+        return added
+
+    def msetraw(self, client, data):
+        with client.cursor(True) as cursor:
+            consumed, added = cursor.putmulti(encodedict(data), dupdata=False)
         return added
 
     # Cursor operations.
@@ -1228,11 +1248,13 @@ class Client(object):
     mdelete = command('MDELETE')
     mget = command('MGET')
     mgetdup = command('MGETDUP')
+    mgetraw = command('MGETRAW')
     mpop = command('MPOP')
     mreplace = command('MREPLACE')
     mset = command('MSET')
     msetdup = command('MSETDUP')
     msetnx = command('MSETNX')
+    msetraw = command('MSETRAW')
 
     # Cursor operations.
     deleterange = command('DELETERANGE')
