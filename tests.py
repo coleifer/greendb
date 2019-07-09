@@ -189,6 +189,11 @@ class TestBasicOperations(BaseTestCase):
         self.assertEqual(self.c.get('key'), 'bbb')
         self.assertEqual(self.c.get('key2'), 'xxx')
 
+    def test_get_set_raw(self):
+        self.assertEqual(self.c.setraw('key', b'abc'), 1)
+        self.assertEqual(self.c.getraw('key'), b'abc')
+        self.assertTrue(self.c.getraw('x') is None)
+
     def test_crud_dupsort(self):
         # Use the DB with dupsort enabled.
         self.c.use(3)

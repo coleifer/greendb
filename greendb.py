@@ -642,6 +642,7 @@ class Server(object):
             ('EXISTS', self.exists),
             ('GET', self.get),
             ('GETDUP', self.getdup),
+            ('GETRAW', self.getraw),
             ('LENGTH', self.length),
             ('POP', self.pop),
             ('REPLACE', self.replace),
@@ -649,6 +650,7 @@ class Server(object):
             ('SETDUP', self.setdup),
             ('SETDUPRAW', self.setdupraw),
             ('SETNX', self.setnx),
+            ('SETRAW', self.setraw),
 
             # Bulk K/V operations.
             ('MDELETE', self.mdelete),
@@ -799,6 +801,10 @@ class Server(object):
                     break
         return accum
 
+    def getraw(self, client, key):
+        with client.ctx() as txn:
+            return txn.get(encode(key))
+
     def length(self, client, key):
         value = self.get(client, key)
         if value is not None:
@@ -837,6 +843,10 @@ class Server(object):
         with client.ctx(True) as txn:
             return txn.put(encode(key), mpackb(value), dupdata=False,
                            overwrite=False)
+
+    def setraw(self, client, key, value):
+        with client.ctx(True) as txn:
+            return txn.put(encode(key), encode(value), dupdata=False)
 
     # Bulk K/V operations.
     def mdelete(self, client, keys):
@@ -1204,6 +1214,7 @@ class Client(object):
     exists = command('EXISTS')
     get = command('GET')
     getdup = command('GETDUP')
+    getraw = command('GETRAW')
     length = command('LENGTH')
     pop = command('POP')
     replace = command('REPLACE')
@@ -1211,6 +1222,7 @@ class Client(object):
     setdup = command('SETDUP')
     setdupraw = command('SETDUPRAW')
     setnx = command('SETNX')
+    setraw = command('SETRAW')
 
     # Bulk k/v operations.
     mdelete = command('MDELETE')
