@@ -1138,11 +1138,11 @@ class Server(object):
 
 
 class SocketPool(object):
-    def __init__(self, host, port, timeout=60, max_age=300):
+    def __init__(self, host, port, timeout=60, max_age=None):
         self.host = host
         self.port = port
         self.timeout = timeout
-        self.max_age = max_age
+        self.max_age = max_age or 3600
         self.free = []
         self.in_use = {}
 
@@ -1205,12 +1205,12 @@ class _ConnectionLocal(_ConnectionState, greenlet_local): pass
 
 class Client(object):
     def __init__(self, host='127.0.0.1', port=31337, decode_keys=False,
-                 timeout=60, pool=True):
+                 timeout=60, pool=True, max_age=None):
         self.host = host
         self.port = port
         self._decode_keys = decode_keys
         self._timeout = timeout
-        self._pool = SocketPool(host, port, timeout) if pool else None
+        self._pool = SocketPool(host, port, timeout, max_age) if pool else None
         self._protocol = ProtocolHandler()
         self._state = _ConnectionLocal()
 
