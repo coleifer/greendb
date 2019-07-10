@@ -43,7 +43,7 @@ def run_server():
 class BaseTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.c = Client(host=TEST_HOST, port=TEST_PORT)
+        cls.c = Client(host=TEST_HOST, port=TEST_PORT, pool=False)
 
     @classmethod
     def tearDownClass(cls):

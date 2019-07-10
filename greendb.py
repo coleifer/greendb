@@ -139,7 +139,10 @@ class _Socket(object):
         if not self.is_closed:
             self.buf.close()
             self.sendbuf.close()
-            self._socket.shutdown(socket.SHUT_RDWR)
+            try:
+                self._socket.shutdown(socket.SHUT_RDWR)
+            except socket.error:
+                pass
             self._socket.close()
 
     def _read_from_socket(self, length):
@@ -1134,6 +1137,62 @@ class Server(object):
         return self._commands[command](client, *data[1:])
 
 
+class SocketPool(object):
+    def __init__(self, host, port, timeout=60, max_age=300):
+        self.host = host
+        self.port = port
+        self.timeout = timeout
+        self.max_age = max_age
+        self.free = []
+        self.in_use = {}
+
+    def checkout(self):
+        now = time.time()
+        tid = get_ident()
+        if tid in self.in_use:
+            sock = self.in_use[tid]
+            if sock.is_closed:
+                del self.in_use[tid]
+            else:
+                return self.in_use[tid]
+
+        while self.free:
+            ts, sock = heapq.heappop(self.free)
+            if ts < now - self.max_age:
+                sock.close()
+            else:
+                self.in_use[tid] = sock
+                return sock
+
+        sock = self.create_socket()
+        self.in_use[tid] = sock
+        return sock
+
+    def create_socket(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        sock.settimeout(self.timeout)
+        sock.connect((self.host, self.port))
+        return _Socket(sock)
+
+    def checkin(self):
+        tid = get_ident()
+        if tid in self.in_use:
+            sock = self.in_use.pop(tid)
+            if not sock.is_closed:
+                heapq.heappush(self.free, (time.time(), sock))
+            return True
+        return False
+
+    def close(self):
+        tid = get_ident()
+        sock = self.in_use.pop(tid, None)
+        if sock:
+            sock.close()
+            return True
+        return False
+
+
 class _ConnectionState(object):
     def __init__(self, **kwargs):
         super(_ConnectionState, self).__init__(**kwargs)
@@ -1146,11 +1205,12 @@ class _ConnectionLocal(_ConnectionState, greenlet_local): pass
 
 class Client(object):
     def __init__(self, host='127.0.0.1', port=31337, decode_keys=False,
-                 timeout=60):
+                 timeout=60, pool=True):
         self.host = host
         self.port = port
         self._decode_keys = decode_keys
         self._timeout = timeout
+        self._pool = SocketPool(host, port, timeout) if pool else None
         self._protocol = ProtocolHandler()
         self._state = _ConnectionLocal()
 
@@ -1159,17 +1219,25 @@ class Client(object):
 
     def close(self):
         if self._state.conn is None: return False
-        self._state.conn.close()
+        if self._pool is not None:
+            self._pool.checkin()
+        else:
+            self._state.conn.close()
         self._state.reset()
         return True
 
     def connect(self):
         if self._state.conn is not None: return False
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        sock.settimeout(self._timeout)
-        sock.connect((self.host, self.port))
-        self._state.conn = _Socket(sock)
+        if self._pool is None:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            sock.settimeout(self._timeout)
+            sock.connect((self.host, self.port))
+            conn = _Socket(sock)
+        else:
+            conn = self._pool.checkout()
+
+        self._state.conn = conn
         return True
 
     def read_response(self, conn, close_conn=False):
