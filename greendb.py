@@ -1247,6 +1247,7 @@ class Client(object):
             self.close()
             raise ConnectionError('server went away')
         except Exception:
+            logger.exception('internal server error')
             self.close()
             raise ServerInternalError('internal server error')
         else:
