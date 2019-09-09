@@ -41,8 +41,10 @@ if sys.version_info[0] == 3:
     unicode = str
     basestring = (bytes, str)
     int_types = int
+    use_buffers = True
 else:
     int_types = (int, long)
+    use_buffers = False
 
 def encode(s):
     if isinstance(s, unicode):
@@ -393,7 +395,7 @@ class ProtocolHandler(object):
         sock.send(blocking)
 
     def _write(self, sock, data):
-        if isinstance(data, bytes):
+        if isinstance(data, (bytes, memoryview)):
             sock.write(b'$%d\r\n%s\r\n' % (len(data), data))
         elif isinstance(data, unicode):
             data = encode(data)
@@ -534,7 +536,8 @@ class Storage(object):
         if not isinstance(db, int_types):
             raise ValueError('database index must be integer')
 
-        txn = self.env.begin(db=self.databases[db], write=write)
+        txn = self.env.begin(db=self.databases[db], write=write,
+                             buffers=use_buffers)
         try:
             yield txn
         except Exception as exc:
@@ -954,6 +957,8 @@ class Server(object):
 
             while True:
                 key = cursor.key()
+                if use_buffers:
+                    key = key.tobytes()
                 if stop is not None and key > stop:
                     break
 
@@ -982,6 +987,8 @@ class Server(object):
 
             while True:
                 key, data = cb(cursor)
+                if use_buffers:
+                    key = key.tobytes()
                 if stop is not None and stopcond(key, stop):
                     break
                 accum.append(data)
@@ -1013,6 +1020,8 @@ class Server(object):
 
             while True:
                 value = cursor.value()
+                if use_buffers:
+                    value = value.tobytes()
                 if stop is not None and value > stop:
                     break
                 accum.append(value)
