@@ -120,6 +120,9 @@ class TestBasicOperations(BaseTestCase):
         self.assertEqual(sc['max_dbs'], 4)
         self.assertEqual(sc['sync'], 0)
 
+        rc = self.c.reader_check()
+        self.assertEqual(rc, 0)
+
     def test_decode_keys(self):
         c = Client(host=TEST_HOST, port=TEST_PORT, decode_keys=True)
         c.mset({'k1': b'v1', 'k2': {'x1': 'y1', 'x2': {'y2': b'z2'}}})

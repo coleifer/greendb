@@ -528,6 +528,9 @@ class Storage(object):
     def info(self):
         return self.env.info()
 
+    def reader_check(self):
+        return self.env.reader_check()
+
     @contextmanager
     def db(self, db=0, write=False):
         if not self.is_open:
@@ -633,6 +636,7 @@ class Server(object):
             # Database / environment management.
             ('ENVINFO', self.envinfo),
             ('ENVSTAT', self.envstat),
+            ('READERCHECK', self.reader_check),
             ('FLUSH', self.flush),
             ('FLUSHALL', self.flushall),
             ('PING', self.ping),
@@ -706,6 +710,9 @@ class Server(object):
 
     def envstat(self, client):
         return self.storage.stat()
+
+    def reader_check(self, client):
+        return self.storage.reader_check()
 
     def flush(self, client):
         return self.storage.flush(client.db)
@@ -1300,6 +1307,7 @@ class Client(object):
     # Database/schema management.
     envinfo = command('ENVINFO')
     envstat = command('ENVSTAT')
+    reader_check = command('READERCHECK')
     flush = command('FLUSH')
     flushall = command('FLUSHALL')
     ping = command('PING')
