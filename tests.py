@@ -37,6 +37,7 @@ def run_server():
             if os.path.exists(tmp_dir):
                 shutil.rmtree(tmp_dir)
     t = gevent.spawn(run)
+    gevent.sleep(0)
     return t, server, tmp_dir
 
 
