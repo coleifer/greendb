@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "greendb"
+dynamic = ["version"]
+description = "database server powered by gevent and lmdb"
+dependencies = ["lmdb", "msgpack-python", "gevent"]
+readme = "README.md"
+authors = [
+    { name = "Charles Leifer", email = "coleifer@gmail.com" }
+]
+classifiers = [
+    "Programming Language :: Python :: 2",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Repository = "https://github.com/coleifer/greendb"
+Documentation = "https://github.com/coleifer/greendb/blob/master/README.md"
+
+[tool.setuptools]
+py-modules = ["greendb", "greenquery"]
+
+[tool.setuptools.dynamic]
+version = { attr = "greendb.__version__" }
