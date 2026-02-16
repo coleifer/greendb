@@ -1493,7 +1493,7 @@ def parse_map_size(value):
     return int(mapsize) * exp
 
 
-if __name__ == '__main__':
+def main():
     options, args = get_option_parser().parse_args()
 
     configure_logger(options)
@@ -1527,3 +1527,7 @@ if __name__ == '__main__':
         server.run()
     except KeyboardInterrupt:
         print('\x1b[1;31mshutting down\x1b[0m')
+
+
+if __name__ == '__main__':
+    main()

@@ -17,6 +17,9 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
+[project.scripts]
+greendb = "greendb:main"
+
 [project.urls]
 Repository = "https://github.com/coleifer/greendb"
 Documentation = "https://github.com/coleifer/greendb/blob/master/README.md"
