@@ -1460,7 +1460,7 @@ def read_config(config_file):
         data = fh.read()
 
     # Strip comments.
-    config = json.loads(re.sub('\s*\/\/.*', '', data))
+    config = json.loads(re.sub(r'\s*\/\/.*', '', data))
 
     if config.get('map_size'):
         config['map_size'] = parse_map_size(config['map_size'])
