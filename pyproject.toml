@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "greendb"
 dynamic = ["version"]
 description = "database server powered by gevent and lmdb"
-dependencies = ["lmdb", "msgpack-python", "gevent"]
+dependencies = ["lmdb", "msgpack", "gevent"]
 readme = "README.md"
 authors = [
     { name = "Charles Leifer", email = "coleifer@gmail.com" }

@@ -403,7 +403,7 @@ class ProtocolHandler(object):
         elif data is True or data is False:
             sock.write(b'#%s\r\n' % (b't' if data else b'f'))
         elif isinstance(data, int_types):
-            if data > MAXINT:
+            if data >= MAXINT or data < -MAXINT:
                 sock.write(b'(%d\r\n' % data)
             else:
                 sock.write(b':%d\r\n' % data)
@@ -432,7 +432,8 @@ class ProtocolHandler(object):
                 self._write(sock, key)
                 self._write(sock, attributes[key])
         elif isinstance(data, float):
-            sock.write(b',%0.8f\r\n' % data)
+            # repr() produces the shortest string that round-trips exactly.
+            sock.write(b',%s\r\n' % encode(repr(data)))
         elif isinstance(data, (list, tuple)):
             sock.write(b'*%d\r\n' % len(data))
             for item in data:
@@ -506,6 +507,7 @@ class Storage(object):
 
         self.sync(True)  # Always sync before closing.
         self.env.close()
+        self.is_open = False
         return True
 
     def reset(self):
@@ -593,7 +595,7 @@ class Connection(object):
 
 
 mpackb = lambda o: msgpack_packb(o, use_bin_type=True)
-munpackb = lambda b: msgpack_unpackb(b, raw=False)
+munpackb = lambda b: msgpack_unpackb(b, raw=False, strict_map_key=False)
 def mpackdict(d):
     for key, value in d.items():
         yield (encode(key), mpackb(value))
@@ -1020,7 +1022,10 @@ class Server(object):
 
         with client.cursor() as cursor:
             if start is None:
-                if not cursor.set_range(encode(key)):
+                # set_key() positions at the exact key -- set_range() would
+                # move to the next key when the requested one is missing,
+                # returning values from a neighboring key.
+                if not cursor.set_key(encode(key)):
                     return []
             elif not cursor.set_range_dup(encode(key), encode(start)):
                 return []
@@ -1161,6 +1166,9 @@ class SocketPool(object):
         self.max_age = max_age or 3600
         self.free = []
         self.in_use = {}
+        # Tie-breaker for the free heap: _Socket does not support comparison,
+        # so two check-ins with the same timestamp would raise a TypeError.
+        self._counter = 0
 
     def checkout(self):
         now = time.time()
@@ -1173,7 +1181,7 @@ class SocketPool(object):
                 return self.in_use[tid]
 
         while self.free:
-            ts, sock = heapq.heappop(self.free)
+            ts, _, sock = heapq.heappop(self.free)
             if ts < now - self.max_age:
                 sock.close()
             else:
@@ -1196,7 +1204,8 @@ class SocketPool(object):
         if tid in self.in_use:
             sock = self.in_use.pop(tid)
             if not sock.is_closed:
-                heapq.heappush(self.free, (time.time(), sock))
+                self._counter += 1
+                heapq.heappush(self.free, (time.time(), self._counter, sock))
             return True
         return False
 
@@ -1387,7 +1396,7 @@ class Client(object):
 
     def update(self, __data=None, **kwargs):
         if __data is not None:
-            params = __data
+            params = dict(__data)  # Copy to avoid mutating caller's data.
             params.update(kwargs)
         else:
             params = kwargs

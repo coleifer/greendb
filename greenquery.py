@@ -312,7 +312,7 @@ class Model(with_metaclass(DeclarativeMeta)):
 
     def save(self):
         if self.id and self._meta.indexes:
-            original_data = self._read_model_data(primary_key)
+            original_data = self._read_model_data(self.id)
         else:
             original_data = None
 

@@ -581,6 +581,12 @@ class TestBasicOperations(BaseTestCase):
         self.c.set('i1', 2.0)
         self.assertEqual(self.c.incr('i1'), 3.)
 
+    def test_float_precision(self):
+        # Floats are serialized using repr() so values round-trip exactly.
+        for value in (0.1, 1e-12, -1.5e300, 1234567.891234567):
+            self.c.set('f1', value)
+            self.assertEqual(self.c.get('f1'), value)
+
     def test_cas(self):
         self.c.set('k1', b'v1')
         self.c.set('k2', b'v2')
@@ -711,6 +717,17 @@ class TestBasicOperations(BaseTestCase):
         assertS('1 ', '1 ~', [1, 2, 4])
         assertS('0 ', '1 ~', [3, 5, 6, 7, 8, 1, 2, 4])
 
+    def test_getrangedupraw_missing_key(self):
+        self.c.use(3)
+        self.c.setdupraw('k2', 'v2-a')
+        self.c.setdupraw('k2', 'v2-b')
+
+        # Requesting a missing key must not return the values stored in a
+        # neighboring key.
+        self.assertEqual(self.c.getrangedupraw('k1'), [])
+        self.assertEqual(self.c.getrangedupraw('k3'), [])
+        self.assertEqual(self.c.getrangedupraw('k2'), [b'v2-a', b'v2-b'])
+
     def test_processing_instruction_use_db(self):
         # Verify we can specify the database for a one-off operation.
         for i in range(4):
@@ -826,6 +843,25 @@ class TestGreenQuery(BaseTestCase):
         for username, status in username_status:
             User.create(username=username, status=status)
         return username_status
+
+    def test_save_existing(self):
+        huey = User.create(username='huey', status=1)
+        zaizee = User.create(username='zaizee', status=2)
+
+        # Re-saving an existing instance updates the secondary indexes.
+        huey.username = 'huey-x'
+        huey.status = 3
+        huey.save()
+
+        u_db = User.get(User.username == 'huey-x')
+        self.assertEqual(u_db.id, huey.id)
+        self.assertEqual(u_db.status, 3)
+
+        # The old index entries were removed.
+        self.assertTrue(User.get(User.username == 'huey') is None)
+        self.assertEqual(User.query(User.status == 1), [])
+        self.assertEqual([u.id for u in User.query(User.status >= 2)],
+                         [zaizee.id, huey.id])
 
     def test_basic_operations(self):
         username_status = self._create_test_users()
