@@ -5,7 +5,6 @@ from gevent import socket
 from gevent.local import local as greenlet_local
 from gevent.pool import Pool
 from gevent.server import StreamServer
-from gevent.thread import get_ident
 
 import lmdb
 from msgpack import packb as msgpack_packb
@@ -24,6 +23,7 @@ import os
 import re
 import shutil
 import time
+import weakref
 
 
 __version__ = '0.2.5'
@@ -223,18 +223,21 @@ class _Socket:
         return False
 
     def _send_to_socket(self):
-        if self.is_closed:
-            return
-
-        data = self.sendbuf.getvalue()
-        self.sendbuf.seek(0)
-        self.sendbuf.truncate()
-        self.bytes_pending = 0
         try:
-            self._socket.sendall(data)
-        except socket.error:
-            self.close()
-            raise ConnectionError('connection went away while sending data')
+            # Loop until the send buffer is drained: more data may be written
+            # (e.g. by a pipelining client) while sendall() is blocked, and no
+            # new sender is spawned while _write_pending is set.
+            while self.bytes_pending and not self.is_closed:
+                data = self.sendbuf.getvalue()
+                self.sendbuf.seek(0)
+                self.sendbuf.truncate()
+                self.bytes_pending = 0
+                try:
+                    self._socket.sendall(data)
+                except socket.error:
+                    self.close()
+                    raise ConnectionError('connection went away while '
+                                          'sending data')
         finally:
             self._write_pending = False
 
@@ -1144,31 +1147,33 @@ class SocketPool:
         self.timeout = timeout
         self.max_age = max_age or 3600
         self.free = []
-        self.in_use = {}
+        # Keyed on the owning greenlet/thread object: entries vanish when the
+        # owner is garbage-collected, and the orphaned socket closes itself
+        # via _Socket.__del__.
+        self.in_use = weakref.WeakKeyDictionary()
         # Tie-breaker for the free heap: _Socket does not support comparison,
         # so two check-ins with the same timestamp would raise a TypeError.
         self._counter = 0
 
     def checkout(self):
         now = time.time()
-        tid = get_ident()
-        if tid in self.in_use:
-            sock = self.in_use[tid]
-            if sock.is_closed:
-                del self.in_use[tid]
-            else:
-                return self.in_use[tid]
+        owner = gevent.getcurrent()
+        sock = self.in_use.get(owner)
+        if sock is not None:
+            if not sock.is_closed:
+                return sock
+            del self.in_use[owner]
 
         while self.free:
             ts, _, sock = heapq.heappop(self.free)
             if ts < now - self.max_age:
                 sock.close()
             else:
-                self.in_use[tid] = sock
+                self.in_use[owner] = sock
                 return sock
 
         sock = self.create_socket()
-        self.in_use[tid] = sock
+        self.in_use[owner] = sock
         return sock
 
     def create_socket(self):
@@ -1179,9 +1184,8 @@ class SocketPool:
         return _Socket(sock)
 
     def checkin(self):
-        tid = get_ident()
-        if tid in self.in_use:
-            sock = self.in_use.pop(tid)
+        sock = self.in_use.pop(gevent.getcurrent(), None)
+        if sock is not None:
             if not sock.is_closed:
                 self._counter += 1
                 heapq.heappush(self.free, (time.time(), self._counter, sock))
@@ -1189,9 +1193,8 @@ class SocketPool:
         return False
 
     def close(self):
-        tid = get_ident()
-        sock = self.in_use.pop(tid, None)
-        if sock:
+        sock = self.in_use.pop(gevent.getcurrent(), None)
+        if sock is not None:
             sock.close()
             return True
         return False

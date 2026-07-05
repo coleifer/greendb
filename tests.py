@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import datetime
+import gc
 import logging
 import os
 import shutil
@@ -754,6 +755,44 @@ class TestBasicOperations(BaseTestCase):
         self.assertTrue('stop' in attrs.data)
 
 
+class TestSocketPool(BaseTestCase):
+    def test_pooled_client(self):
+        client = Client(host=TEST_HOST, port=TEST_PORT)
+        results = {}
+        def worker(n):
+            client.set('k%s' % n, 'v%s' % n)
+            results[n] = client.get('k%s' % n)
+            client.close()  # Checks the connection back into the pool.
+        gevent.joinall([gevent.spawn(worker, i) for i in range(8)])
+        self.assertEqual(results, {i: 'v%s' % i for i in range(8)})
+
+        # All sockets were checked back in.
+        self.assertEqual(len(client._pool.in_use), 0)
+        self.assertTrue(len(client._pool.free) >= 1)
+
+        # The main greenlet can check out a free socket and use it.
+        client.set('k-x', 'v-x')
+        self.assertEqual(client.get('k-x'), 'v-x')
+        client.quit()
+
+    def test_pool_reclaims_dead_owners(self):
+        client = Client(host=TEST_HOST, port=TEST_PORT)
+        def worker(n):
+            client.set('k%s' % n, n)  # Exits without closing!
+        glets = [gevent.spawn(worker, i) for i in range(4)]
+        gevent.joinall(glets)
+        self.assertEqual(len(client._pool.in_use), 4)
+
+        # Once the greenlets are collected, their entries vanish and the
+        # orphaned sockets close themselves. The hub holds a reference to the
+        # last greenlet until its callbacks run, so yield before collecting.
+        del glets
+        gevent.sleep(0)
+        gc.collect()
+        self.assertEqual(len(client._pool.in_use), 0)
+        client.quit()
+
+
 class Base(Model):
     class Meta:
         client = Client(host=TEST_HOST, port=TEST_PORT)
@@ -827,6 +866,29 @@ class TestGreenQuery(BaseTestCase):
 
         self.assertEqual(m1.f, {'k1': 'v1', 'k2': 'v2'})
         self.assertEqual(m2.f, ['foo', 'bar', 'baz'])
+
+    def test_negative_index_values(self):
+        for i in (-3, -1, 2, 5):
+            Misc.create(f_i=i, f_l=i * 1000)
+
+        def assertQ(expr, nums):
+            self.assertEqual([m.f_i for m in Misc.query(expr)], nums)
+
+        assertQ(Misc.f_i < 0, [-3, -1])
+        assertQ(Misc.f_i >= -1, [-1, 2, 5])
+        assertQ(Misc.f_i.between(-3, 2, True, True), [-3, -1, 2])
+        self.assertEqual([m.f_l for m in Misc.query(Misc.f_l < 0)],
+                         [-3000, -1000])
+
+    def test_query_skips_stale_index_entries(self):
+        huey = User.create(username='huey', status=1)
+        zaizee = User.create(username='zaizee', status=1)
+
+        # Delete huey's row directly, leaving its index entries in place.
+        User._meta.client.delete(User._meta.get_instance_key(huey.id))
+
+        query = User.query(User.status == 1)
+        self.assertEqual([u.username for u in query], ['zaizee'])
 
     def _create_test_users(self):
         username_status = (

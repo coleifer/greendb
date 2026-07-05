@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "greendb"
 dynamic = ["version"]
 description = "database server powered by gevent and lmdb"
-dependencies = ["lmdb", "msgpack", "gevent"]
+dependencies = ["lmdb", "msgpack>=1.0", "gevent"]
 requires-python = ">=3.8"
 readme = "README.md"
 authors = [

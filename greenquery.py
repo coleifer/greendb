@@ -1,6 +1,5 @@
 import datetime
 import struct
-import time
 
 from greendb import Client
 
@@ -42,6 +41,10 @@ class Node:
     __le__ = _e('<=')
     __gt__ = _e('>')
     __ge__ = _e('>=')
+
+    # Overriding __eq__ suppresses the default hash; restore it so nodes can
+    # be used in sets and as dict keys.
+    __hash__ = object.__hash__
 
     def between(self, start, stop, start_inclusive=True, stop_inclusive=False):
         return Expression(self, 'between', (start, stop, start_inclusive,
@@ -109,12 +112,22 @@ class Field(Node):
 
 class IntegerField(Field):
     def index_value(self, value):
-        return struct.pack('>H', value)
+        # Offset-binary (excess-2^31) encoding: negative values sort before
+        # positive in the byte-ordered index.
+        return struct.pack('>I', value + 0x80000000)
 
 
 class LongField(Field):
     def index_value(self, value):
-        return struct.pack('>Q', value)
+        return struct.pack('>Q', value + 0x8000000000000000)
+
+
+def dt_to_micros(value):
+    # Microseconds since 0001-01-01, independent of the local timezone (which
+    # made time.mktime() ambiguous around DST transitions).
+    delta = value - datetime.datetime.min
+    return (delta.days * 86400000000 + delta.seconds * 1000000 +
+            delta.microseconds)
 
 
 class DateTimeField(Field):
@@ -125,10 +138,7 @@ class DateTimeField(Field):
         return datetime.datetime.strptime(value, '%Y-%m-%d %H:%M:%S.%f')
 
     def index_value(self, value):
-        timestamp = time.mktime(value.timetuple())
-        timestamp += value.microsecond * .000001
-        timestamp = int(timestamp * 1e6)
-        return struct.pack('>Q', timestamp)
+        return struct.pack('>Q', dt_to_micros(value))
 
 
 class TimestampField(Field):
@@ -136,17 +146,11 @@ class TimestampField(Field):
         super().__init__(index=index, default=default)
 
     def serialize(self, value):
-        timestamp = time.mktime(value.timetuple())
-        timestamp += value.microsecond * .000001
-        timestamp = int(timestamp * 1e6)
-        return struct.pack('>Q', timestamp)
+        return struct.pack('>Q', dt_to_micros(value))
 
     def deserialize(self, value):
         raw_ts, = struct.unpack('>Q', value)
-        timestamp, micro = divmod(raw_ts, 1e6)
-        return (datetime.datetime
-                .fromtimestamp(timestamp)
-                .replace(microsecond=int(micro)))
+        return datetime.datetime.min + datetime.timedelta(microseconds=raw_ts)
 
     index_value = serialize
 
@@ -429,7 +433,9 @@ class Model(metaclass=DeclarativeMeta):
         key_to_data = cls._meta.client.mget(keys)
 
         deserialize = cls._deserialize_raw_data
-        return [cls(**deserialize(key_to_data[key])) for key in keys]
+        # Skip index entries whose row no longer exists.
+        return [cls(**deserialize(key_to_data[key])) for key in keys
+                if key in key_to_data]
 
 
 class Index:
