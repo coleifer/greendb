@@ -729,12 +729,12 @@ class Server:
         return stat['entries']
 
     def decr(self, client, key, amount=1):
-        return self._incr(client, encode(key), -amount)
+        return self._incr(client, encode(key), -amount, 'decr')
 
     def incr(self, client, key, amount=1):
-        return self._incr(client, encode(key), amount)
+        return self._incr(client, encode(key), amount, 'incr')
 
-    def _incr(self, client, key, amount):
+    def _incr(self, client, key, amount, cmd):
         with client.cursor(True) as cursor:
             # If the key does not exist, just set the desired value.
             if not cursor.set_key(key):
@@ -745,7 +745,7 @@ class Server:
             try:
                 value = orig + amount
             except TypeError:
-                raise CommandError('decr operation on wrong type of value')
+                raise CommandError('%s operation on wrong type of value' % cmd)
 
             cursor.delete()
             cursor.put(key, mpackb(value))
@@ -1087,7 +1087,21 @@ class Server:
                 logger.exception('Error processing command.')
 
     def request_response(self, client):
-        data = self._protocol.handle(client.sock)
+        try:
+            data = self._protocol.handle(client.sock)
+        except ConnectionError:
+            raise
+        except Exception as exc:
+            # A request that cannot be parsed leaves the read buffer in an
+            # indeterminate state, so report the error and close the
+            # connection rather than risk misreading the data that follows.
+            logger.exception('Protocol error')
+            try:
+                self._protocol.write_response(
+                    client.sock, Error('protocol error: %s' % exc), True)
+            finally:
+                client.close()
+            raise ClientQuit('protocol error')
 
         # If we received a processing instruction, it will be handled here, as
         # the next request will contain the relevant data.
@@ -1483,13 +1497,33 @@ def parse_map_size(value):
 
 
 def main():
-    options = get_option_parser().parse_args()
+    parser = get_option_parser()
+    options = parser.parse_args()
+
+    # Re-parse with defaults suppressed to determine which options were given
+    # explicitly on the command-line. Explicit options take precedence over
+    # the config file, which takes precedence over built-in defaults.
+    for action in parser._actions:
+        action.default = argparse.SUPPRESS
+    explicit = vars(parser.parse_args())
 
     configure_logger(options)
     if options.reset and os.path.exists(options.data_dir):
         shutil.rmtree(options.data_dir)
 
     config = read_config(options.config or 'config.json')
+
+    if 'data_dir' in explicit:
+        explicit['path'] = explicit.pop('data_dir')
+    if 'map_size' in explicit:
+        explicit['map_size'] = parse_map_size(explicit['map_size'])
+    if 'no_metasync' in explicit:
+        explicit['metasync'] = not explicit.pop('no_metasync')
+    for key in ('path', 'host', 'map_size', 'max_clients', 'max_dbs', 'port',
+                'sync', 'dupsort', 'metasync', 'writemap', 'map_async'):
+        if key in explicit:
+            config[key] = explicit[key]
+
     config.setdefault('path', options.data_dir)
     config.setdefault('host', options.host)
     config.setdefault('map_size', parse_map_size(options.map_size))

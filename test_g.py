@@ -1,5 +1,5 @@
 """
-Test simpledb with many concurrent connections.
+Test greendb with many concurrent connections.
 """
 from gevent import monkey; monkey.patch_all()
 

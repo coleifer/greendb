@@ -10,6 +10,7 @@ import tempfile
 import unittest
 
 import gevent
+from gevent import socket
 
 from greendb import Client
 from greendb import CommandError
@@ -791,6 +792,26 @@ class TestSocketPool(BaseTestCase):
         gc.collect()
         self.assertEqual(len(client._pool.in_use), 0)
         client.quit()
+
+
+class TestProtocolErrors(BaseTestCase):
+    def test_parse_error(self):
+        # A request that cannot be parsed receives an error response, after
+        # which the server closes the connection (the read buffer may be in
+        # an indeterminate state), rather than leaving the client waiting on
+        # a reply that will never arrive.
+        conn = socket.create_connection((TEST_HOST, TEST_PORT), timeout=5)
+        try:
+            conn.sendall(b'#z\r\n')  # Invalid value for boolean type.
+            resp = conn.recv(4096)
+            self.assertTrue(resp.startswith(b'!'))
+            self.assertTrue(b'protocol error' in resp)
+            self.assertEqual(conn.recv(4096), b'')  # Server closed the conn.
+        finally:
+            conn.close()
+
+        # The server remains healthy afterwards.
+        self.assertEqual(self.c.ping(), b'pong')
 
 
 class Base(Model):
