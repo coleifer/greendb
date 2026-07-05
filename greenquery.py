@@ -1,6 +1,5 @@
 import datetime
 import struct
-import sys
 import time
 
 from greendb import Client
@@ -18,13 +17,7 @@ __all__ = [
 ]
 
 
-if sys.version_info[0] == 2:
-    unicode_type = unicode
-else:
-    unicode_type = str
-
-
-class Node(object):
+class Node:
     def __init__(self):
         self.negated = False
 
@@ -71,7 +64,7 @@ class Expression(Node):
 def encode(s):
     if isinstance(s, bytes):
         return s
-    elif isinstance(s, unicode_type):
+    elif isinstance(s, str):
         return s.encode('utf8')
     return str(s).encode('utf8')
 
@@ -140,7 +133,7 @@ class DateTimeField(Field):
 
 class TimestampField(Field):
     def __init__(self, index=False, default=datetime.datetime.now):
-        super(TimestampField, self).__init__(index=index, default=default)
+        super().__init__(index=index, default=default)
 
     def serialize(self, value):
         timestamp = time.mktime(value.timetuple())
@@ -163,7 +156,7 @@ class BooleanField(Field):
         return b'\x01' if value else b'\x00'
 
 
-class FieldDescriptor(object):
+class FieldDescriptor:
     def __init__(self, field):
         self.field = field
         self.name = self.field.name
@@ -179,8 +172,8 @@ class FieldDescriptor(object):
 
 class DeclarativeMeta(type):
     def __new__(cls, name, bases, attrs):
-        if bases == (object,):
-            return super(DeclarativeMeta, cls).__new__(cls, name, bases, attrs)
+        if not bases:
+            return super().__new__(cls, name, bases, attrs)
 
         client = None
         db = None
@@ -227,7 +220,7 @@ class DeclarativeMeta(type):
             fields['id'] = LongField()
 
         attrs['_meta'] = Metadata(name, client, db, index_db, fields)
-        model = super(DeclarativeMeta, cls).__new__(cls, name, bases, attrs)
+        model = super().__new__(cls, name, bases, attrs)
 
         # Bind fields to model.
         for name, field in fields.items():
@@ -239,7 +232,7 @@ class DeclarativeMeta(type):
         return model
 
 
-class Metadata(object):
+class Metadata:
     def __init__(self, model_name, client, db, index_db, fields):
         self.model_name = model_name
         self.client = client
@@ -285,11 +278,7 @@ class Metadata(object):
         return '%s:%s' % (self.name, instance_id)
 
 
-def with_metaclass(meta, base=object):
-    return meta('newbase', (base,), {})
-
-
-class Model(with_metaclass(DeclarativeMeta)):
+class Model(metaclass=DeclarativeMeta):
     def __init__(self, **kwargs):
         self._data = self._meta.defaults.copy()
         for key, value in self._meta.defaults_callable.items():
@@ -443,7 +432,7 @@ class Model(with_metaclass(DeclarativeMeta)):
         return [cls(**deserialize(key_to_data[key])) for key in keys]
 
 
-class Index(object):
+class Index:
     def __init__(self, client, index_db, field):
         self.client = client
         self.db = index_db

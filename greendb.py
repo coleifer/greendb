@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 
-from __future__ import unicode_literals  # Required for 2.x compatability.
-
 import gevent
 from gevent import socket
 from gevent.local import local as greenlet_local
@@ -17,18 +15,14 @@ from collections import namedtuple
 from contextlib import contextmanager
 from functools import wraps
 from io import BytesIO
-from socket import error as socket_error
-import datetime
+import argparse
 import heapq
 import json
 import logging
 import operator
-import optparse
 import os
 import re
 import shutil
-import sys
-import struct
 import time
 
 
@@ -37,17 +31,8 @@ __version__ = '0.2.5'
 logger = logging.getLogger(__name__)
 
 
-if sys.version_info[0] == 3:
-    unicode = str
-    basestring = (bytes, str)
-    int_types = int
-    use_buffers = True
-else:
-    int_types = (int, long)
-    use_buffers = False
-
 def encode(s):
-    if isinstance(s, unicode):
+    if isinstance(s, str):
         return s.encode('utf-8')
     elif isinstance(s, bytes):
         return s
@@ -64,7 +49,7 @@ def encode_bulk_list(l):
     return [encode(k) for k in l]
 
 def decode(s):
-    if isinstance(s, unicode):
+    if isinstance(s, str):
         return s
     elif isinstance(s, bytes):
         return s.decode('utf-8')
@@ -88,14 +73,13 @@ class ServerInternalError(ServerError): pass
 class CommandError(Exception):
     def __init__(self, message):
         self.message = message
-        super(CommandError, self).__init__()
+        super().__init__()
     def __str__(self):
         return self.message
-    __unicode__ = __str__
 
 
 Error = namedtuple('Error', ('message',))
-class Attributes(object):
+class Attributes:
     __slots__ = ('data',)
     def __init__(self, data=None):
         self.data = data or {}
@@ -115,7 +99,7 @@ _AttributeResponse = namedtuple('_AttributeResponse', ('data', 'attributes'))
 class AttributeResponse(_AttributeResponse):
     def __new__(cls, data, **attrs):
         attributes = Attributes(attrs)
-        return super(AttributeResponse, cls).__new__(cls, data, attributes)
+        return super().__new__(cls, data, attributes)
 
 PI_USE_DB = b'\x01'
 PROCESSING_INSTRUCTIONS = set((PI_USE_DB,))
@@ -125,7 +109,7 @@ MAXINT = 1 << 63
 READSIZE = 4 * 1024
 
 
-class _Socket(object):
+class _Socket:
     def __init__(self, s):
         self._socket = s
         self.is_closed = False
@@ -278,7 +262,7 @@ class _Socket(object):
         return True
 
 
-class ProtocolHandler(object):
+class ProtocolHandler:
     def __init__(self):
         self.handlers = {
             b'*': self.handle_array,
@@ -397,12 +381,12 @@ class ProtocolHandler(object):
     def _write(self, sock, data):
         if isinstance(data, (bytes, memoryview)):
             sock.write(b'$%d\r\n%s\r\n' % (len(data), data))
-        elif isinstance(data, unicode):
+        elif isinstance(data, str):
             data = encode(data)
             sock.write(b'^%d\r\n%s\r\n' % (len(data), data))
         elif data is True or data is False:
             sock.write(b'#%s\r\n' % (b't' if data else b'f'))
-        elif isinstance(data, int_types):
+        elif isinstance(data, int):
             if data >= MAXINT or data < -MAXINT:
                 sock.write(b'(%d\r\n' % data)
             else:
@@ -455,7 +439,7 @@ class ProtocolHandler(object):
 DEFAULT_MAP_SIZE = 1024 * 1024 * 256  # 256MB.
 
 
-class Storage(object):
+class Storage:
     def __init__(self, path, map_size=DEFAULT_MAP_SIZE, read_only=False,
                  metasync=True, sync=False, writemap=False, map_async=False,
                  meminit=True, max_dbs=16, max_spare_txns=64, lock=True,
@@ -538,11 +522,11 @@ class Storage(object):
         if not self.is_open:
             raise ValueError('Cannot operate on closed environment.')
 
-        if not isinstance(db, int_types):
+        if not isinstance(db, int):
             raise ValueError('database index must be integer')
 
         txn = self.env.begin(db=self.databases[db], write=write,
-                             buffers=use_buffers)
+                             buffers=True)
         try:
             yield txn
         except Exception as exc:
@@ -564,7 +548,7 @@ class Storage(object):
         return self.env.sync(force)
 
 
-class Connection(object):
+class Connection:
     def __init__(self, storage, sock):
         self.storage = storage
         self.sock = sock
@@ -615,7 +599,7 @@ def requires_dupsort(meth):
     return verify_dupsort
 
 
-class Server(object):
+class Server:
     def __init__(self, host='127.0.0.1', port=31337, max_clients=1024,
                  path='data', **storage_config):
         self._host = host
@@ -965,9 +949,7 @@ class Server(object):
                 return n
 
             while True:
-                key = cursor.key()
-                if use_buffers:
-                    key = key.tobytes()
+                key = cursor.key().tobytes()
                 if stop is not None and key > stop:
                     break
 
@@ -996,8 +978,7 @@ class Server(object):
 
             while True:
                 key, data = cb(cursor)
-                if use_buffers:
-                    key = key.tobytes()
+                key = key.tobytes()
                 if stop is not None and stopcond(key, stop):
                     break
                 accum.append(data)
@@ -1031,9 +1012,7 @@ class Server(object):
                 return []
 
             while True:
-                value = cursor.value()
-                if use_buffers:
-                    value = value.tobytes()
+                value = cursor.value().tobytes()
                 if stop is not None and value > stop:
                     break
                 accum.append(value)
@@ -1146,7 +1125,7 @@ class Server(object):
             except:
                 raise CommandError('Unrecognized request type.')
 
-        if not isinstance(data[0], basestring):
+        if not isinstance(data[0], (bytes, str)):
             raise CommandError('First parameter must be command name.')
 
         command = data[0].upper()
@@ -1158,7 +1137,7 @@ class Server(object):
         return self._commands[command](client, *data[1:])
 
 
-class SocketPool(object):
+class SocketPool:
     def __init__(self, host, port, timeout=60, max_age=None):
         self.host = host
         self.port = port
@@ -1218,9 +1197,9 @@ class SocketPool(object):
         return False
 
 
-class _ConnectionState(object):
+class _ConnectionState:
     def __init__(self, **kwargs):
-        super(_ConnectionState, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.reset()
     def reset(self): self.conn = None
     def set_connection(self, conn): self.conn = conn
@@ -1228,7 +1207,7 @@ class _ConnectionState(object):
 class _ConnectionLocal(_ConnectionState, greenlet_local): pass
 
 
-class Client(object):
+class Client:
     def __init__(self, host='127.0.0.1', port=31337, decode_keys=False,
                  timeout=60, pool=True, max_age=None):
         self.host = host
@@ -1407,46 +1386,44 @@ class Client(object):
 
 
 def get_option_parser():
-    parser = optparse.OptionParser()
-    parser.add_option('-c', '--config', default='config.json', dest='config',
-                      help='Config file (default="config.json")')
-    parser.add_option('-D', '--data-dir', default='data', dest='data_dir',
-                      help='Directory to store db environment and data.')
-    parser.add_option('-d', '--debug', action='store_true', dest='debug',
-                      help='Log debug messages.')
-    parser.add_option('-e', '--errors', action='store_true', dest='error',
-                      help='Log error messages only.')
-    parser.add_option('-H', '--host', default='127.0.0.1', dest='host',
-                      help='Host to listen on.')
-    parser.add_option('-l', '--log-file', dest='log_file', help='Log file.')
-    parser.add_option('-m', '--map-size', dest='map_size', help=(
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-c', '--config', default='config.json',
+                        help='Config file (default="config.json")')
+    parser.add_argument('-D', '--data-dir', default='data',
+                        help='Directory to store db environment and data.')
+    parser.add_argument('-d', '--debug', action='store_true',
+                        help='Log debug messages.')
+    parser.add_argument('-e', '--errors', action='store_true', dest='error',
+                        help='Log error messages only.')
+    parser.add_argument('-H', '--host', default='127.0.0.1',
+                        help='Host to listen on.')
+    parser.add_argument('-l', '--log-file', help='Log file.')
+    parser.add_argument('-m', '--map-size', help=(
         'Maximum size of memory-map used for database. The default value is '
         '256M and should be increased. Accepts value in bytes or file-size '
         'using "M" or "G" suffix.'))
-    parser.add_option('--max-clients', default=1024, dest='max_clients',
-                      help='Maximum number of clients.', type=int)
-    parser.add_option('-n', '--max-dbs', default=16, dest='max_dbs',
-                      help='Number of databases in environment. Default=16.',
-                      type='int')
-    parser.add_option('-p', '--port', default=31337, dest='port',
-                      help='Port to listen on.', type=int)
-    parser.add_option('-r', '--reset', action='store_true', dest='reset',
-                      help='Reset database and config. All data will be lost.')
-    parser.add_option('-s', '--sync', action='store_true', dest='sync',
-                      help=('Flush system buffers to disk when committing a '
-                            'transaction. Durable but much slower.'))
-    parser.add_option('-u', '--dupsort', action='append', dest='dupsort',
-                      help='db index(es) to support dupsort', type='int'),
-    parser.add_option('-M', '--no-metasync', action='store_true',
-                      dest='no_metasync', help=(
-                          'Flush system buffers to disk only once per '
-                          'transaction, omit the metadata flush.'))
-    parser.add_option('-W', '--writemap', action='store_true', dest='writemap',
-                      help='Use a writeable memory map.')
-    parser.add_option('-A', '--map-async', action='store_true',
-                      dest='map_async', help=(
-                          'When used with "--writemap" (-W), use asynchronous '
-                          'flushes to disk.'))
+    parser.add_argument('--max-clients', default=1024, type=int,
+                        help='Maximum number of clients.')
+    parser.add_argument('-n', '--max-dbs', default=16, type=int,
+                        help='Number of databases in environment. Default=16.')
+    parser.add_argument('-p', '--port', default=31337, type=int,
+                        help='Port to listen on.')
+    parser.add_argument('-r', '--reset', action='store_true',
+                        help='Reset database and config. All data will be '
+                             'lost.')
+    parser.add_argument('-s', '--sync', action='store_true',
+                        help=('Flush system buffers to disk when committing a '
+                              'transaction. Durable but much slower.'))
+    parser.add_argument('-u', '--dupsort', action='append', type=int,
+                        help='db index(es) to support dupsort')
+    parser.add_argument('-M', '--no-metasync', action='store_true', help=(
+        'Flush system buffers to disk only once per transaction, omit the '
+        'metadata flush.'))
+    parser.add_argument('-W', '--writemap', action='store_true',
+                        help='Use a writeable memory map.')
+    parser.add_argument('-A', '--map-async', action='store_true', help=(
+        'When used with "--writemap" (-W), use asynchronous flushes to '
+        'disk.'))
     return parser
 
 
@@ -1503,7 +1480,7 @@ def parse_map_size(value):
 
 
 def main():
-    options, args = get_option_parser().parse_args()
+    options = get_option_parser().parse_args()
 
     configure_logger(options)
     if options.reset and os.path.exists(options.data_dir):

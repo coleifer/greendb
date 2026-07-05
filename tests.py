@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 
-from __future__ import unicode_literals  # Required for 2.x compatability.
-
 import datetime
 import logging
 import os
@@ -51,13 +49,13 @@ class BaseTestCase(unittest.TestCase):
         cls.c.quit()
 
     def tearDown(self):
-        super(BaseTestCase, self).tearDown()
+        super().tearDown()
         self.c.flushall()
 
 
 class TestBasicOperations(BaseTestCase):
     def setUp(self):
-        super(TestBasicOperations, self).setUp()
+        super().setUp()
         # By default we will use the 0th database.
         self.c.use(0)
 

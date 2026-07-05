@@ -52,32 +52,33 @@ Dependencies:
 ```
 $ greendb.py -h
 
-Usage: greendb.py [options]
+usage: greendb.py [-h] [-c CONFIG] [-D DATA_DIR] [-d] [-e] [-H HOST]
+                  [-l LOG_FILE] [-m MAP_SIZE] [--max-clients MAX_CLIENTS]
+                  [-n MAX_DBS] [-p PORT] [-r] [-s] [-u DUPSORT] [-M] [-W] [-A]
 
-Options:
+options:
   -h, --help            show this help message and exit
-  -c CONFIG, --config=CONFIG
-                        Config file (default="config.json")
-  -D DATA_DIR, --data-dir=DATA_DIR
+  -c, --config CONFIG   Config file (default="config.json")
+  -D, --data-dir DATA_DIR
                         Directory to store db environment and data.
   -d, --debug           Log debug messages.
   -e, --errors          Log error messages only.
-  -H HOST, --host=HOST  Host to listen on.
-  -l LOG_FILE, --log-file=LOG_FILE
+  -H, --host HOST       Host to listen on.
+  -l, --log-file LOG_FILE
                         Log file.
-  -m MAP_SIZE, --map-size=MAP_SIZE
+  -m, --map-size MAP_SIZE
                         Maximum size of memory-map used for database. The
                         default value is 256M and should be increased. Accepts
                         value in bytes or file-size using "M" or "G" suffix.
-  --max-clients=MAX_CLIENTS
+  --max-clients MAX_CLIENTS
                         Maximum number of clients.
-  -n MAX_DBS, --max-dbs=MAX_DBS
+  -n, --max-dbs MAX_DBS
                         Number of databases in environment. Default=16.
-  -p PORT, --port=PORT  Port to listen on.
+  -p, --port PORT       Port to listen on.
   -r, --reset           Reset database and config. All data will be lost.
   -s, --sync            Flush system buffers to disk when committing a
                         transaction. Durable but much slower.
-  -u DUPSORT, --dupsort=DUPSORT
+  -u, --dupsort DUPSORT
                         db index(es) to support dupsort
   -M, --no-metasync     Flush system buffers to disk only once per
                         transaction, omit the metadata flush.
